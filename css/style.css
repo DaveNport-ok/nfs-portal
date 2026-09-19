@@ -454,7 +454,6 @@ body.chats-page, body.topic-page, body.leaderboard-page {
    SWEETALERT2 / NFS CYBERPUNK HUD GLITCH MODAL (COMPACT & BORDERLESS)
    ========================================================================== */
 
-/* Аккуратный, сдержанный глитч вплотную к буквам */
 @keyframes cyberRgbGlitch {
   0%, 100% {
     text-shadow: 0.6px 0 #ff0055, -0.6px 0 #00ffff;
@@ -466,12 +465,10 @@ body.chats-page, body.topic-page, body.leaderboard-page {
     text-shadow: 0.8px 0 #ff0055, -0.8px 0 #00ffff;
   }
   60%, 85% {
-    /* Спокойная фаза с едва заметной хроматической аберрацией */
     text-shadow: 0.4px 0 #ff0055, -0.4px 0 #00ffff;
   }
 }
 
-/* Плавное переливание иконки */
 @keyframes cyberIconGlow {
   0%, 100% {
     filter: drop-shadow(2px 0 0 #ff0055) drop-shadow(-2px 0 0 #00ffff);
@@ -483,21 +480,19 @@ body.chats-page, body.topic-page, body.leaderboard-page {
   }
 }
 
-/* Фон вокруг окна */
 .swal2-container {
   backdrop-filter: blur(6px) !important;
   background: rgba(0, 0, 0, 0.8) !important;
   z-index: 99999 !important;
 }
 
-/* 1. Основное окно без рамки */
 .swal2-popup {
   position: relative !important;
   background: rgba(8, 8, 8, 0.97) !important;
   color: #ffffff !important;
   border-radius: 0 !important;
   border: none !important;
-  padding: 14px 28px !important; /* Сплюснули по вертикали */
+  padding: 14px 28px !important;
   box-sizing: border-box !important;
   max-width: 460px !important;
   min-height: auto !important;
@@ -510,12 +505,10 @@ body.chats-page, body.topic-page, body.leaderboard-page {
   ) !important;
 }
 
-/* Полностью отключаем внутренний желтый контур */
 .swal2-popup::after {
   display: none !important;
 }
 
-/* 2. Заголовок с умеренным красно-голубым переливом */
 .swal2-title {
   font-family: 'Wallpoet', sans-serif !important;
   font-size: 1.35rem !important;
@@ -529,7 +522,6 @@ body.chats-page, body.topic-page, body.leaderboard-page {
   animation: cyberRgbGlitch 1.8s ease-in-out infinite !important;
 }
 
-/* 3. Текст описания */
 .swal2-html-container {
   font-family: 'Wallpoet', sans-serif !important;
   font-size: 0.9rem !important;
@@ -542,7 +534,6 @@ body.chats-page, body.topic-page, body.leaderboard-page {
   animation: cyberRgbGlitch 2.4s ease-in-out infinite !important;
 }
 
-/* 4. Компактные иконки без круглых рамок */
 .swal2-icon {
   border: none !important;
   background: transparent !important;
@@ -551,7 +542,6 @@ body.chats-page, body.topic-page, body.leaderboard-page {
   animation: cyberIconGlow 2.0s ease-in-out infinite alternate !important;
 }
 
-/* Отключаем белые фоновые маски SweetAlert2 */
 .swal2-icon .swal2-success-circular-line-left,
 .swal2-icon .swal2-success-circular-line-right,
 .swal2-icon .swal2-success-fix,
@@ -559,26 +549,22 @@ body.chats-page, body.topic-page, body.leaderboard-page {
   display: none !important;
 }
 
-/* Галочка успеха (Неоново-зеленый / Cyan) */
 .swal2-icon.swal2-success [class^='swal2-success-line'] {
   background-color: #00ffaa !important;
   box-shadow: 0 0 10px #00ffaa, 0 0 20px #00ffff !important;
 }
 
-/* Крестик ошибки (Неоново-красный) */
 .swal2-icon.swal2-error [class^='swal2-x-mark-line'] {
   background-color: #ff0055 !important;
   box-shadow: 0 0 10px #ff0055, 0 0 20px #ff0000 !important;
 }
 
-/* Иконка предупреждения (Желто-оранжевая) */
 .swal2-icon.swal2-warning {
   color: var(--nfs-yellow) !important;
   font-size: 2.2rem !important;
   text-shadow: 2px 0 #ff0055, -2px 0 #00ffff !important;
 }
 
-/* 5. Кнопки (Срезанные края HUD) */
 .swal2-actions {
   margin: 6px 0 4px 0 !important;
   gap: 10px !important;
@@ -637,7 +623,6 @@ body.chats-page, body.topic-page, body.leaderboard-page {
   background: #252525 !important;
 }
 
-/* Авто-растягивание окна, если внутри открыта картинка */
 .swal2-popup:has(.swal2-image) {
   max-width: 90vw !important;
   width: auto !important;
@@ -645,7 +630,6 @@ body.chats-page, body.topic-page, body.leaderboard-page {
   clip-path: none !important;
 }
 
-/* Сама картинка */
 .swal2-image {
   max-width: 85vw !important;
   max-height: 80vh !important;
@@ -1367,28 +1351,67 @@ body.chats-page, body.topic-page, body.leaderboard-page {
 }
 
 /* --- СТРАНИЦА: LEADERBOARD --- */
+.leaderboard-frame-wrapper {
+  position: relative;
+  margin-bottom: 25px;
+  background: rgba(10, 10, 10, 0.96);
+  border: 1px solid rgba(241, 196, 15, 0.35);
+  box-shadow:
+    0 0 25px rgba(0, 0, 0, 0.95),
+    inset 0 0 15px rgba(241, 196, 15, 0.05),
+    0 0 15px rgba(241, 196, 15, 0.2);
+
+  clip-path: polygon(
+    14px 0, 100% 0,
+    100% calc(100% - 14px), calc(100% - 14px) 100%,
+    0 100%, 0 14px
+  );
+}
+
+.leaderboard-frame-wrapper::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+
+  background:
+    linear-gradient(to right, var(--nfs-yellow) 24px, transparent 24px) top left / 100% 2px no-repeat,
+    linear-gradient(to bottom, var(--nfs-yellow) 24px, transparent 24px) top left / 2px 100% no-repeat,
+    linear-gradient(to left, var(--nfs-yellow) 24px, transparent 24px) bottom right / 100% 2px no-repeat,
+    linear-gradient(to top, var(--nfs-yellow) 24px, transparent 24px) bottom right / 2px 100% no-repeat;
+
+  filter: drop-shadow(0 0 6px var(--nfs-yellow));
+}
+
 .blacklist-table {
+  position: relative;
+  z-index: 1;
   width: 100%;
   border-collapse: collapse;
-  background: rgba(0, 0, 0, 0.85);
+  background: transparent;
   table-layout: fixed;
+  margin: 0;
 }
 
 .blacklist-table th {
   text-align: left;
-  padding: 12px 10px;
+  padding: 14px 12px;
   background: #111;
   color: var(--nfs-yellow);
   text-transform: uppercase;
-  font-size: 0.8rem;
+  font-size: 0.85rem;
+  letter-spacing: 1px;
+  border-bottom: 2px solid #222;
 }
 
 .blacklist-table td {
   padding: 12px 10px;
+  border-bottom: 1px solid #161616;
 }
 
 .blacklist-row:hover {
-  background: rgba(241, 196, 15, 0.05);
+  background: rgba(241, 196, 15, 0.07);
   cursor: pointer;
 }
 
@@ -1402,6 +1425,7 @@ body.chats-page, body.topic-page, body.leaderboard-page {
 
 .top-rank {
   color: var(--nfs-yellow);
+  text-shadow: 0 0 10px rgba(241, 196, 15, 0.4);
 }
 
 .racer-avatar {
@@ -1425,6 +1449,56 @@ body.chats-page, body.topic-page, body.leaderboard-page {
   font-size: 0.85rem !important;
   font-weight: bold;
   text-transform: uppercase;
+}
+
+/* Золотое свечение первого места (#1 Blacklist Boss) */
+.blacklist-row.rank-1-row {
+  position: relative;
+  background: linear-gradient(
+    90deg,
+    rgba(241, 196, 15, 0.22) 0%,
+    rgba(241, 196, 15, 0.08) 35%,
+    rgba(10, 10, 10, 0.4) 100%
+  ) !important;
+  box-shadow: inset 3px 0 0 var(--nfs-yellow), inset 0 0 18px rgba(241, 196, 15, 0.15) !important;
+}
+
+.blacklist-row.rank-1-row .racer-avatar {
+  border-color: var(--nfs-yellow) !important;
+  box-shadow: 0 0 12px rgba(241, 196, 15, 0.45);
+}
+
+.blacklist-row.rank-1-row .rank-num {
+  color: #ffffff !important;
+  text-shadow:
+    0 0 8px var(--nfs-yellow),
+    0 0 16px rgba(241, 196, 15, 0.7);
+}
+
+.blacklist-row.rank-1-row .racer-name {
+  color: #ffffff !important;
+  text-shadow: 0 0 10px rgba(241, 196, 15, 0.4);
+}
+
+.blacklist-row.rank-1-row:hover {
+  background: linear-gradient(
+    90deg,
+    rgba(241, 196, 15, 0.32) 0%,
+    rgba(241, 196, 15, 0.14) 40%,
+    rgba(10, 10, 10, 0.6) 100%
+  ) !important;
+  box-shadow: inset 4px 0 0 #ffffff, inset 0 0 22px rgba(241, 196, 15, 0.3) !important;
+}
+
+@keyframes goldPulse {
+  0% {
+    text-shadow: 0 0 6px var(--nfs-yellow), 0 0 12px rgba(241, 196, 15, 0.5);
+    transform: scale(1);
+  }
+  100% {
+    text-shadow: 0 0 14px var(--nfs-yellow), 0 0 24px rgba(255, 230, 0, 0.85);
+    transform: scale(1.03);
+  }
 }
 
 /* ==========================================
@@ -2205,10 +2279,15 @@ button:not(.btn-tuning):not(.steam-friends-toggle-btn):hover::after,
     text-align: center;
   }
 
-  .blacklist-table {
-    display: block;
-    width: 100%;
+  .leaderboard-frame-wrapper {
     overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .blacklist-table {
+    display: table;
+    width: 100%;
+    min-width: 540px;
     white-space: nowrap;
   }
 
