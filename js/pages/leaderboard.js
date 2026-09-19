@@ -130,8 +130,11 @@ function renderLeaderboard() {
     else if (rank === 3) rankClass = 'top-rank rank-3';
 
     const row = document.createElement('tr');
-    row.className = 'blacklist-row';
-    if (isMe) row.style.background = "rgba(255, 255, 255, 0.08)";
+    row.className = `blacklist-row ${rank === 1 ? 'rank-1-row' : ''}`;
+
+    if (isMe && rank !== 1) {
+      row.style.background = "rgba(255, 255, 255, 0.08)";
+    }
 
     row.onclick = () => window.location.href = `profile.html?u=${racer.username}`;
 
