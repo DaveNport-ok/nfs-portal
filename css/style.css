@@ -1369,19 +1369,7 @@ body.chats-page, body.topic-page, body.leaderboard-page {
 }
 
 .leaderboard-frame-wrapper::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  z-index: 2;
-
-  background:
-    linear-gradient(to right, var(--nfs-yellow) 24px, transparent 24px) top left / 100% 2px no-repeat,
-    linear-gradient(to bottom, var(--nfs-yellow) 24px, transparent 24px) top left / 2px 100% no-repeat,
-    linear-gradient(to left, var(--nfs-yellow) 24px, transparent 24px) bottom right / 100% 2px no-repeat,
-    linear-gradient(to top, var(--nfs-yellow) 24px, transparent 24px) bottom right / 2px 100% no-repeat;
-
-  filter: drop-shadow(0 0 6px var(--nfs-yellow));
+  display: none !important;
 }
 
 .blacklist-table {
