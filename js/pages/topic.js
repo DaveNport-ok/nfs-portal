@@ -17,7 +17,7 @@ window.onload = async () => {
     currentUserId = user.id;
     window.currentUserId = user.id;
 
-    const { data: prof } = await _supabase.from('profiles').select('id, username, status').eq('id', user.id).single();
+    const { data: prof } = await _supabase.from('profiles').select('*').eq('id', user.id).single();
     if (prof) {
       prof.isGuest = false;
       myName = prof.username;
@@ -136,7 +136,7 @@ async function loadFullTopic() {
     </div>
   `;
 
-  // Кнопки редактирования и удаления доступны только автору-пользователю
+  // Кнопки редактирования и удаления топика доступны только его автору
   if (currentUserId && currentUserId === data.author_id) {
     document.getElementById('authorControls')?.classList.remove('hidden');
   } else {
@@ -168,8 +168,34 @@ async function loadComments() {
       });
       const dotHTML = getOnlineDotHTML(c.author_name);
 
+      // Проверка прав: автор комментария или администратор
+      const isMine = !window.myProfile?.isGuest && myName && (c.author_name?.toLowerCase() === myName.toLowerCase());
+      const canManage = isMine || Boolean(window.myProfile?.is_admin);
+
+      // Блок кнопок управления (карандаш и крестик в стиле чата)
+      const actionButtonsHTML = canManage ? `
+        <span style="display: inline-flex; align-items: center; gap: 8px; margin-left: 10px;">
+          <span
+            onclick="editComment('${c.id}')"
+            title="Edit comment"
+            style="color: #666; cursor: pointer; font-size: 0.85rem; font-family: 'Arial', sans-serif; font-weight: bold; transition: color 0.2s;"
+            onmouseover="this.style.color='var(--nfs-yellow, #f1c40f)'"
+            onmouseout="this.style.color='#666'">
+            ✎
+          </span>
+          <span
+            onclick="deleteComment('${c.id}')"
+            title="Delete comment"
+            style="color: #666; cursor: pointer; font-size: 0.95rem; font-family: 'Arial', sans-serif; font-weight: bold; transition: color 0.2s; line-height: 1;"
+            onmouseover="this.style.color='#ff4757'"
+            onmouseout="this.style.color='#666'">
+            ✕
+          </span>
+        </span>
+      ` : '';
+
       list.innerHTML += `
-        <div class="comment" style="position: relative;">
+        <div class="comment" id="comment-${c.id}" style="position: relative;">
           <div class="comment-meta" style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 12px;">
              <span style="display: inline-flex; align-items: center; height: 1.4rem; gap: 6px;">
                <span class="racer-link" style="line-height: 1;" onclick="window.location.href='profile.html?u=${encodeURIComponent(c.author_name)}'">
@@ -179,12 +205,14 @@ async function loadComments() {
                  ${dotHTML}
                </span>
              </span>
-             <span class="comment-date-clean">${commentDate}</span>
+             <span style="display: inline-flex; align-items: center;">
+               <span class="comment-date-clean">${commentDate}</span>${actionButtonsHTML}
+             </span>
           </div>
 
-          <div class="user-text-content" style="white-space: pre-line;">${formatCommentText(c.content, myName)}</div>
+          <div class="user-text-content" id="comment-text-${c.id}" style="white-space: pre-line;">${formatCommentText(c.content, myName)}</div>
 
-          <div style="margin-top: 0px; border-top: 1px solid #1a1a1a; padding-top: 2px;">
+          <div style="margin-top: 6px; border-top: 1px solid #1a1a1a; padding-top: 2px;">
             <span onclick="insertReplyTag('${c.author_name}')" style="color: #555; cursor: pointer; font-size: 0.75rem; text-transform: uppercase; font-family: 'Arial', sans-serif; font-weight: bold; transition: color 0.2s;" onmouseover="this.style.color='#00ff66'" onmouseout="this.style.color='#555'">
               [ Reply ]
             </span>
@@ -274,6 +302,92 @@ window.postComment = async () => {
   }
 };
 
+window.editComment = async (commentId) => {
+  if (!window.myProfile || window.myProfile.isGuest || !currentUserId) return;
+
+  // Получаем текущий текст комментария из Supabase
+  const { data: comment, error } = await _supabase
+    .from('forum_comments')
+    .select('content')
+    .eq('id', commentId)
+    .single();
+
+  if (error || !comment) return;
+
+  const { value: newText } = await Swal.fire({
+    title: 'EDIT COMMENT',
+    input: 'textarea',
+    inputValue: comment.content,
+    showCancelButton: true,
+    confirmButtonText: 'SAVE',
+    cancelButtonText: 'CANCEL',
+    background: '#0a0a0a',
+    color: '#fff',
+    customClass: { popup: 'nfs-crt-modal' },
+    inputValidator: (value) => {
+      if (!value || !value.trim()) {
+        return 'Comment cannot be empty!';
+      }
+    }
+  });
+
+  if (!newText || newText.trim() === comment.content) return;
+
+  const { error: updateErr } = await _supabase
+    .from('forum_comments')
+    .update({ content: newText.trim() })
+    .eq('id', commentId);
+
+  if (updateErr) {
+    Swal.fire({
+      title: 'ERROR',
+      text: updateErr.message,
+      icon: 'error',
+      customClass: { popup: 'nfs-crt-modal' }
+    });
+    return;
+  }
+
+  await loadComments();
+};
+
+window.deleteComment = async (commentId) => {
+  if (!window.myProfile || window.myProfile.isGuest || !currentUserId) return;
+
+  const result = await Swal.fire({
+    title: 'DELETE COMMENT?',
+    text: 'This comment will be deleted permanently.',
+    icon: 'warning',
+    showCancelButton: true,
+    confirmButtonColor: '#ff4757',
+    cancelButtonColor: '#333',
+    confirmButtonText: 'YES, DELETE',
+    cancelButtonText: 'CANCEL',
+    background: '#0a0a0a',
+    color: '#fff',
+    customClass: { popup: 'nfs-crt-modal' }
+  });
+
+  if (!result.isConfirmed) return;
+
+  const { error } = await _supabase
+    .from('forum_comments')
+    .delete()
+    .eq('id', commentId);
+
+  if (error) {
+    Swal.fire({
+      title: 'ERROR',
+      text: error.message,
+      icon: 'error',
+      customClass: { popup: 'nfs-crt-modal' }
+    });
+    return;
+  }
+
+  await loadComments();
+};
+
 window.confirmDeleteTopic = async () => {
   if (!currentUserId || window.myProfile?.isGuest) return;
 
@@ -330,7 +444,6 @@ window.updateFriendsStatusOnly = function () {
 };
 
 window.insertReplyTag = function (authorName) {
-  // Защита от клика гостя по кнопке ответа
   if (!window.myProfile || window.myProfile.isGuest || !currentUserId) {
     if (typeof window.requireAuth === 'function') {
       window.requireAuth(null, "Log in to reply to comments.");
