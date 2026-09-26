@@ -3,6 +3,80 @@
 // Глобальный объект для хранения пользователей онлайн
 window.onlineUsers = {};
 
+/**
+ * Проверка, является ли текущий пользователь гостем
+ */
+window.isGuestUser = function() {
+  return !window.myProfile || window.myProfile.isGuest === true || !window.myProfile.id;
+};
+
+/**
+ * Обертка для защиты действий (кнопки, отправка форм и т.д.)
+ */
+window.requireAuth = function(actionCallback, message = "This action is available for authorized drivers only.") {
+  if (window.isGuestUser()) {
+    if (typeof Swal !== 'undefined') {
+      Swal.fire({
+        title: 'ACCESS RESTRICTED',
+        text: message,
+        icon: 'info',
+        background: '#0a0a0a',
+        color: '#fff',
+        showCancelButton: true,
+        confirmButtonText: 'LOG IN',
+        cancelButtonText: 'CANCEL',
+        confirmButtonColor: '#f1c40f',
+        cancelButtonColor: '#333'
+      }).then((result) => {
+        if (result.isConfirmed) {
+          if (typeof window.openModal === 'function') {
+            window.openModal();
+          } else {
+            window.location.href = 'auth.html';
+          }
+        }
+      });
+    } else {
+      alert(message);
+    }
+    return false;
+  }
+
+  if (typeof actionCallback === 'function') {
+    actionCallback();
+  }
+  return true;
+};
+
+/**
+ * Блокировка полей ввода для гостей на страницах (форум, чаты и комментарии)
+ */
+window.applyGuestRestrictions = function() {
+  if (!window.isGuestUser()) return;
+
+  const elementsToLock = document.querySelectorAll(
+    'textarea:not([data-allow-guest]), input[type="text"]:not([data-allow-guest]), form button[type="submit"]:not([data-allow-guest])'
+  );
+
+  elementsToLock.forEach(el => {
+    if (el.tagName === 'BUTTON' || el.type === 'submit') {
+      el.disabled = true;
+      el.style.opacity = '0.5';
+      el.style.cursor = 'not-allowed';
+      el.title = 'Authorization required';
+    } else {
+      el.disabled = true;
+      el.placeholder = 'Log in to write messages and comments...';
+      el.style.backgroundColor = '#141414';
+      el.style.color = '#666';
+      el.style.cursor = 'not-allowed';
+    }
+  });
+};
+
+/**
+ * Форматирование времени последнего визита
+ */
 window.formatLastSeen = function(dateString) {
   if (!dateString) return "a long time ago";
 
@@ -18,17 +92,61 @@ window.formatLastSeen = function(dateString) {
 };
 
 /**
+ * Обновление плашки пользователя в нижнем баре
+ */
+function updateFooterUserBadge(profile) {
+  const badgeEl = document.getElementById('footerUserBadge');
+  const actionEl = document.getElementById('footerAuthAction');
+  if (!badgeEl) return;
+
+  if (profile && !profile.isGuest && profile.id) {
+    badgeEl.innerText = (profile.username || 'DRIVER').toUpperCase();
+    badgeEl.style.color = 'var(--nfs-yellow, #f1c40f)';
+    badgeEl.style.fontWeight = 'bold';
+
+    if (actionEl) actionEl.style.display = 'none';
+  } else {
+    badgeEl.innerText = 'GUEST';
+    badgeEl.style.color = '#888';
+    badgeEl.style.fontWeight = 'bold';
+
+    if (actionEl) {
+      actionEl.style.display = 'inline';
+      actionEl.innerHTML = `(<a href="auth.html" style="color: var(--nfs-yellow, #f1c40f); text-decoration: none; font-weight: bold;">LOG IN</a>)`;
+    }
+  }
+}
+
+/**
  * Инициализация онлайн-статуса и глобальных каналов
  */
 window.initGlobalStatus = async function(supabaseClient, profile) {
   if (!supabaseClient) return;
+
+  const isGuest = !profile || profile.isGuest === true || !profile.id;
+
+  // Формируем безопасный глобальный профиль
+  if (isGuest) {
+    window.myProfile = {
+      id: null,
+      username: profile?.username || ('Guest_' + Math.random().toString(36).substring(2, 6)),
+      isGuest: true,
+      status: 'GUEST',
+      avatar_url: 'https://via.placeholder.com/34?text=G'
+    };
+  } else {
+    window.myProfile = profile;
+  }
+
+  // Обновляем футер
+  updateFooterUserBadge(window.myProfile);
 
   const currentPage = window.location.pathname.split("/").pop() || 'index.html';
 
   const statusChannel = supabaseClient.channel('global-online', {
     config: {
       presence: {
-        key: profile ? profile.username : 'guest_' + Math.random().toString(36).substr(2, 5)
+        key: window.myProfile.username
       }
     }
   });
@@ -39,77 +157,75 @@ window.initGlobalStatus = async function(supabaseClient, profile) {
     const footerOnline = document.getElementById('footerOnline');
     if (footerOnline) footerOnline.innerText = Object.keys(window.onlineUsers).length;
 
-    let inRaceCount = 0;
-    Object.values(window.onlineUsers).forEach(presenceArray => {
-      const pData = presenceArray[0];
-      if (pData && pData.status === 'IN-GAME') {
-        inRaceCount++;
-      }
-    });
-
-    const footerPlaying = document.getElementById('footerPlaying');
-    if (footerPlaying) footerPlaying.innerText = inRaceCount;
-
     if (typeof window.updateFriendsStatusOnly === 'function') window.updateFriendsStatusOnly();
     if (typeof window.updateLiveStatusUI === 'function') window.updateLiveStatusUI();
     if (typeof window.updateSteamFriendsWidgetOnly === 'function') window.updateSteamFriendsWidgetOnly();
   });
 
   window.trackMyStatus = async (newStatus) => {
-    if (!profile) return;
+    if (window.isGuestUser()) return;
 
     if (newStatus) {
       localStorage.setItem('driver_status', newStatus);
     }
 
-    const currentStatus = newStatus || localStorage.getItem('driver_status') || profile.status || 'ONLINE';
+    const currentStatus = newStatus || localStorage.getItem('driver_status') || window.myProfile.status || 'ONLINE';
 
     await statusChannel.track({
-      user: profile.username,
-      avatar_url: profile.avatar_url,
+      user: window.myProfile.username,
+      avatar_url: window.myProfile.avatar_url,
       location: currentPage,
       status: currentStatus
     });
   };
 
-  if (profile) {
-    const isChatPage = window.location.pathname.includes('chats.html');
-    const isTopicPage = window.location.pathname.includes('topic.html');
+  // Виджет друзей Steam (инжектируется и гостям, но показывает окно авторизации)
+  const isChatPage = window.location.pathname.includes('chats.html');
+  const isTopicPage = window.location.pathname.includes('topic.html');
 
-    if (!isChatPage && !isTopicPage) {
-      injectSteamFriendsWidget(supabaseClient, profile);
-    }
+  if (!isChatPage && !isTopicPage) {
+    injectSteamFriendsWidget(supabaseClient, window.myProfile);
   }
 
   statusChannel.subscribe(async (status) => {
-    if (status === 'SUBSCRIBED' && profile) {
-      const savedStatus = localStorage.getItem('driver_status') || 'ONLINE';
-      profile.status = savedStatus;
+    if (status === 'SUBSCRIBED') {
+      if (isGuest) {
+        await statusChannel.track({
+          user: window.myProfile.username,
+          avatar_url: window.myProfile.avatar_url,
+          location: currentPage,
+          status: 'GUEST'
+        });
+      } else {
+        const savedStatus = localStorage.getItem('driver_status') || 'ONLINE';
+        window.myProfile.status = savedStatus;
 
-      await window.trackMyStatus(savedStatus);
+        await window.trackMyStatus(savedStatus);
 
-      const now = new Date().toISOString();
-      await supabaseClient
-        .from('profiles')
-        .update({ status: savedStatus, last_seen: now })
-        .eq('id', profile.id);
+        const now = new Date().toISOString();
+        await supabaseClient
+          .from('profiles')
+          .update({ status: savedStatus, last_seen: now })
+          .eq('id', window.myProfile.id);
 
-      if (typeof window.updateGlobalMsgBadge === 'function') {
-        await window.updateGlobalMsgBadge(supabaseClient, profile.id);
+        if (typeof window.updateGlobalMsgBadge === 'function') {
+          await window.updateGlobalMsgBadge(supabaseClient, window.myProfile.id);
+        }
       }
     }
   });
 
-  if (profile) {
+  // Слушатель личных сообщений (только для авторизованных)
+  if (!isGuest && window.myProfile.id) {
     supabaseClient.channel('global-audio-messages')
       .on('postgres_changes', {
         event: 'INSERT',
         schema: 'public',
         table: 'direct_messages',
-        filter: `receiver_id=eq.${profile.id}`
+        filter: `receiver_id=eq.${window.myProfile.id}`
       }, () => {
         if (typeof window.playNotificationSound === 'function') window.playNotificationSound();
-        if (typeof window.updateGlobalMsgBadge === 'function') window.updateGlobalMsgBadge(supabaseClient, profile.id);
+        if (typeof window.updateGlobalMsgBadge === 'function') window.updateGlobalMsgBadge(supabaseClient, window.myProfile.id);
 
         if (currentPage === 'chats.html' && typeof window.loadRecentDMs === 'function') {
           window.loadRecentDMs();
@@ -118,7 +234,7 @@ window.initGlobalStatus = async function(supabaseClient, profile) {
       .subscribe();
   }
 
-  // Перехват новостей от Davenport
+  // Перехват новостей от Davenport (доступен всем, включая гостей)
   supabaseClient.channel('global-announcements')
     .on('postgres_changes', {
       event: 'INSERT',
@@ -183,18 +299,22 @@ window.initGlobalStatus = async function(supabaseClient, profile) {
     })
     .subscribe();
 
-  if (profile) {
+  // Отслеживание ухода со страницы (только для авторизованных)
+  if (!isGuest && window.myProfile.id) {
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'hidden') {
         const now = new Date().toISOString();
         supabaseClient
           .from('profiles')
           .update({ status: 'OFFLINE', last_seen: now })
-          .eq('id', profile.id)
+          .eq('id', window.myProfile.id)
           .then();
       }
     });
   }
+
+  // Применяем блокировку полей ввода для гостей
+  window.applyGuestRestrictions();
 };
 
 /**
@@ -253,7 +373,7 @@ function injectSteamFriendsWidget(supabaseClient, myProfile) {
     if (win) {
       const isHidden = win.style.display === 'none' || win.style.display === '';
       win.style.display = isHidden ? 'flex' : 'none';
-      if (isHidden) refreshSteamFriendsList(supabaseClient, myProfile);
+      if (isHidden) refreshSteamFriendsList(supabaseClient, window.myProfile);
     }
   };
 
@@ -271,12 +391,30 @@ function injectSteamFriendsWidget(supabaseClient, myProfile) {
   document.body.appendChild(btn);
   document.body.appendChild(win);
 
-  refreshSteamFriendsList(supabaseClient, myProfile);
+  refreshSteamFriendsList(supabaseClient, window.myProfile);
 }
 
 async function refreshSteamFriendsList(supabaseClient, myProfile) {
   const body = document.getElementById('steamFriendsBody');
   if (!body) return;
+
+  // Если профиль гостя — показываем приглашение войти
+  if (!myProfile || myProfile.isGuest || !myProfile.id) {
+    body.innerHTML = `
+      <div style="text-align: center; margin-top: 50px; padding: 0 10px;">
+        <div style="color: #cca609; font-size: 0.85rem; font-weight: bold; letter-spacing: 1px; margin-bottom: 8px;">
+          GUEST MODE
+        </div>
+        <p style="color: #888; font-size: 0.75rem; margin-bottom: 20px; line-height: 1.4;">
+          The friends list and driver tracking are available to authorized users only.
+        </p>
+        <a href="auth.html" style="color: #000; background: #cca609; padding: 6px 14px; font-size: 0.75rem; font-weight: bold; text-decoration: none; text-transform: uppercase; letter-spacing: 1px; display: inline-block;">
+          LOG IN
+        </a>
+      </div>
+    `;
+    return;
+  }
 
   const { data: friendships } = await supabaseClient.from('notifications')
     .select('*')

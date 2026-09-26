@@ -52,12 +52,13 @@ window.handleLogout = async function() {
   const user = window.myProfile || window.currentUserId;
   const userId = typeof user === 'object' ? user?.id : user;
 
-  if (userId && typeof _supabase !== 'undefined') {
+  if (userId && typeof _supabase !== 'undefined' && !user?.isGuest) {
     await _supabase.from('profiles').update({ status: 'OFFLINE' }).eq('id', userId);
   }
   if (typeof _supabase !== 'undefined') {
     await _supabase.auth.signOut();
   }
+  localStorage.removeItem('driver_status');
   window.location.href = 'auth.html';
 };
 
@@ -66,7 +67,23 @@ window.handleLogout = async function() {
  */
 window.toggleNotifyPopup = function() {
   const p = document.getElementById('notifyPopup');
-  if (p) p.style.display = p.style.display === 'block' ? 'none' : 'block';
+  if (!p) return;
+
+  const isGuest = !window.myProfile || window.myProfile.isGuest === true;
+  if (isGuest) {
+    const listEl = document.getElementById('notifyList');
+    if (listEl) {
+      listEl.innerHTML = `
+        <div style="padding:15px; font-size:11px; color:#888; text-align:center; line-height: 1.4;">
+          Notifications are only available for authorized drivers.<br>
+          <a href="auth.html" style="color:#f1c40f; text-decoration:none; font-weight:bold; display:inline-block; margin-top:8px;">LOG IN</a>
+        </div>`;
+    }
+    p.style.display = p.style.display === 'block' ? 'none' : 'block';
+    return;
+  }
+
+  p.style.display = p.style.display === 'block' ? 'none' : 'block';
 };
 
 /**
@@ -74,6 +91,8 @@ window.toggleNotifyPopup = function() {
  */
 window.updateFriendNotifications = async function() {
   if (typeof _supabase === 'undefined') return;
+
+  if (window.myProfile?.isGuest) return;
 
   let currentId = window.myProfile?.id || window.currentUserId;
   if (!currentId) {
@@ -199,13 +218,43 @@ function setupNotificationsRealtime(userId) {
  * Логіка роботи модалки підтримки
  */
 window.openSupportModal = async function() {
+  const profile = window.myProfile;
+
+  // Заборона гостям створювати тікети
+  if (!profile || profile.isGuest) {
+    if (typeof Swal !== 'undefined') {
+      Swal.fire({
+        title: 'ACCESS DENIED',
+        text: 'Support tickets are available for authorized drivers only.',
+        icon: 'info',
+        background: '#0a0a0a',
+        color: '#fff',
+        showCancelButton: true,
+        confirmButtonText: 'LOG IN',
+        cancelButtonText: 'CANCEL',
+        confirmButtonColor: '#f1c40f',
+        cancelButtonColor: '#333'
+      }).then((result) => {
+        if (result.isConfirmed) {
+          if (typeof window.openModal === 'function') {
+            window.openModal();
+          } else {
+            window.location.href = 'auth.html';
+          }
+        }
+      });
+    } else {
+      alert('Please log in to contact support.');
+    }
+    return;
+  }
+
   const overlay = document.getElementById('supportModalOverlay');
   const modal = document.getElementById('supportModal');
   if (overlay) overlay.style.display = 'block';
   if (modal) modal.style.display = 'block';
 
-  const profile = window.myProfile;
-  if (profile && typeof _supabase !== 'undefined') {
+  if (typeof _supabase !== 'undefined') {
     await _supabase
       .from('support_tickets')
       .update({ is_read: true })
@@ -226,7 +275,7 @@ window.closeSupportModal = function() {
 
 window.submitSupportTicket = async function() {
   const profile = window.myProfile;
-  if (!profile) {
+  if (!profile || profile.isGuest) {
     Swal.fire({
       title: 'ERROR',
       text: 'You must be logged in to contact support.',
@@ -374,7 +423,7 @@ window.closeAndArchieveTicket = async function() {
 
 window.checkAdminReplies = async function() {
   const profile = window.myProfile;
-  if (!profile || typeof _supabase === 'undefined') return;
+  if (!profile || profile.isGuest || typeof _supabase === 'undefined') return;
 
   const { data: tickets } = await _supabase
     .from('support_tickets')
@@ -446,7 +495,7 @@ window.checkAdminReplies = async function() {
  * Логіка щоденного бонусу
  */
 window.checkDailyBonus = async function(me) {
-  if (!me || typeof _supabase === 'undefined') return;
+  if (!me || me.isGuest || typeof _supabase === 'undefined') return;
 
   const today = new Date().toISOString().split('T')[0];
 
@@ -530,8 +579,25 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   try {
     const { data: { session } } = await _supabase.auth.getSession();
-    if (!session?.user) return;
 
+    // 1. РЕЖИМ ГОСТЯ (немає активної сесії)
+    if (!session?.user) {
+      window.myProfile = {
+        id: null,
+        username: 'Guest_' + Math.random().toString(36).substring(2, 6),
+        isGuest: true,
+        status: 'GUEST',
+        avatar_url: 'https://via.placeholder.com/34?text=G'
+      };
+      window.currentUserId = null;
+
+      if (typeof window.initGlobalStatus === 'function') {
+        await window.initGlobalStatus(_supabase, null);
+      }
+      return;
+    }
+
+    // 2. АВТОРИЗОВАНИЙ КОРИСТУВАЧ
     const { data: profile } = await _supabase
       .from('profiles')
       .select('*')
@@ -539,15 +605,20 @@ document.addEventListener('DOMContentLoaded', async () => {
       .single();
 
     if (profile) {
+      profile.isGuest = false;
       window.myProfile = profile;
       window.currentUserId = profile.id;
+
+      if (typeof window.initGlobalStatus === 'function') {
+        await window.initGlobalStatus(_supabase, profile);
+      }
 
       await window.checkDailyBonus(profile);
       await window.updateGlobalMsgBadge(_supabase, profile.id);
       await window.updateFriendNotifications();
       await window.checkAdminReplies();
 
-      // Підключаємо Realtime слухач для сповіщень
+      // Слухач Realtime сповіщень
       setupNotificationsRealtime(profile.id);
     }
   } catch (err) {
