@@ -1,4 +1,4 @@
-import {_supabase} from '../config.js';
+import { _supabase } from '../config.js';
 import '../widgets.js';
 import '../global.js';
 
@@ -10,14 +10,19 @@ let currentUserId = null;
 let topicData = null;
 
 window.onload = async () => {
-  const {data: {user}} = await _supabase.auth.getUser();
+  const { data: { user } } = await _supabase.auth.getUser();
+
   if (user) {
+    // 1. АВТОРИЗОВАННЫЙ ПОЛЬЗОВАТЕЛЬ
     currentUserId = user.id;
     window.currentUserId = user.id;
-    const {data: prof} = await _supabase.from('profiles').select('id, username, status').eq('id', user.id).single();
+
+    const { data: prof } = await _supabase.from('profiles').select('id, username, status').eq('id', user.id).single();
     if (prof) {
+      prof.isGuest = false;
       myName = prof.username;
       window.myProfile = prof;
+
       if (typeof initGlobalStatus === 'function') {
         initGlobalStatus(_supabase, prof);
       }
@@ -29,12 +34,52 @@ window.onload = async () => {
       }
     }
   } else {
-    window.location.href = 'auth.html';
-    return;
+    // 2. ГОСТЕВОЙ РЕЖИМ (не перенаправляем, разрешаем чтение)
+    currentUserId = null;
+    window.currentUserId = null;
+    myName = "";
+
+    window.myProfile = {
+      id: null,
+      username: 'Guest_' + Math.random().toString(36).substring(2, 6),
+      isGuest: true,
+      status: 'GUEST',
+      avatar_url: 'https://via.placeholder.com/34?text=G'
+    };
+
+    if (typeof initGlobalStatus === 'function') {
+      initGlobalStatus(_supabase, null);
+    }
+
+    lockCommentFormForGuest();
   }
+
   await loadFullTopic();
   await loadComments();
 };
+
+/**
+ * Блокировка формы комментирования для гостей
+ */
+function lockCommentFormForGuest() {
+  const textarea = document.getElementById('commentText');
+  const submitBtn = document.querySelector('button[onclick="postComment()"]') ||
+    document.querySelector('.post-comment-btn');
+
+  if (textarea) {
+    textarea.disabled = true;
+    textarea.placeholder = 'Log in to join discussion and reply to racers...';
+    textarea.style.backgroundColor = '#141414';
+    textarea.style.cursor = 'not-allowed';
+  }
+
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.style.opacity = '0.5';
+    submitBtn.style.cursor = 'not-allowed';
+    submitBtn.title = 'Authorization required';
+  }
+}
 
 function getOnlineDotHTML(username) {
   const isOnline = (typeof onlineUsers !== 'undefined') && onlineUsers[username];
@@ -45,13 +90,18 @@ function formatCommentText(text, currentUserName) {
   if (!text) return "";
   return text.replace(/\[reply:(.+?)\]/g, (match, username) => {
     const cleanNick = username.trim();
-    const color = (cleanNick.toLowerCase() === currentUserName.toLowerCase()) ? '#00ff66' : '#666';
+    const color = (currentUserName && cleanNick.toLowerCase() === currentUserName.toLowerCase()) ? '#00ff66' : '#666';
     return `<span style="color: ${color}; font-weight: bold; font-family: 'Arial', sans-serif !important;">@${cleanNick}</span>`;
   });
 }
 
 async function loadFullTopic() {
-  const {data, error} = await _supabase.from('forum_topics').select('*').eq('id', topicId).single();
+  if (!topicId) {
+    document.getElementById('topicDetail').innerHTML = "<h2>Topic ID is missing.</h2>";
+    return;
+  }
+
+  const { data, error } = await _supabase.from('forum_topics').select('*').eq('id', topicId).single();
   if (error || !data) {
     document.getElementById('topicDetail').innerHTML = "<h2>Topic not found.</h2>";
     return;
@@ -60,7 +110,7 @@ async function loadFullTopic() {
 
   const dotHTML = getOnlineDotHTML(data.author_name);
   const dateObj = new Date(data.created_at);
-  const topicDate = `${dateObj.toLocaleDateString('ru-RU')} ${dateObj.toLocaleTimeString('ru-RU', {
+  const topicDate = `${dateObj.toLocaleDateString('ru-RU')}${dateObj.toLocaleTimeString('ru-RU', {
     hour: '2-digit',
     minute: '2-digit'
   })}`;
@@ -71,7 +121,7 @@ async function loadFullTopic() {
          <span style="display: inline-flex; align-items: center; gap: 2px;">
            <span style="font-size: 0.85rem; color: #555; font-family: 'Arial', 'Helvetica', sans-serif !important;">Post author:</span>
            <span style="display: inline-flex; align-items: center; gap: 6px; margin-left: 5px;">
-             <span class="racer-link" onclick="window.location.href='profile.html?u=${data.author_name}'">
+             <span class="racer-link" onclick="window.location.href='profile.html?u=${encodeURIComponent(data.author_name)}'">
                ${data.author_name}
              </span>${dotHTML}
            </span>
@@ -83,16 +133,21 @@ async function loadFullTopic() {
     </div>
   `;
 
-  if (currentUserId === data.author_id) {
+  // Кнопки редактирования и удаления доступны только автору-пользователю
+  if (currentUserId && currentUserId === data.author_id) {
     document.getElementById('authorControls')?.classList.remove('hidden');
+  } else {
+    document.getElementById('authorControls')?.classList.add('hidden');
   }
 }
 
 async function loadComments() {
-  const {data} = await _supabase.from('forum_comments')
+  if (!topicId) return;
+
+  const { data } = await _supabase.from('forum_comments')
     .select('*')
     .eq('topic_id', topicId)
-    .order('created_at', {ascending: true});
+    .order('created_at', { ascending: true });
 
   const list = document.getElementById('commentsList');
   if (!list) return;
@@ -101,7 +156,7 @@ async function loadComments() {
   if (data && data.length > 0) {
     data.forEach(c => {
       const dateObj = new Date(c.created_at);
-      const commentDate = `${dateObj.toLocaleDateString('ru-RU')} ${dateObj.toLocaleTimeString('ru-RU', {
+      const commentDate = `${dateObj.toLocaleDateString('ru-RU')}${dateObj.toLocaleTimeString('ru-RU', {
         hour: '2-digit',
         minute: '2-digit'
       })}`;
@@ -111,7 +166,7 @@ async function loadComments() {
         <div class="comment" style="position: relative;">
           <div class="comment-meta" style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 12px;">
              <span style="display: inline-flex; align-items: center; height: 1.4rem; gap: 6px;">
-               <span class="racer-link" style="line-height: 1;" onclick="window.location.href='profile.html?u=${c.author_name}'">
+               <span class="racer-link" style="line-height: 1;" onclick="window.location.href='profile.html?u=${encodeURIComponent(c.author_name)}'">
                  ${c.author_name}
                </span>
                <span style="display: inline-flex; align-items: center; justify-content: center; height: 100%; margin-top: 2px;">
@@ -137,11 +192,36 @@ async function loadComments() {
 }
 
 window.postComment = async () => {
+  // Защита от гостей
+  if (!window.myProfile || window.myProfile.isGuest || !currentUserId) {
+    if (typeof window.requireAuth === 'function') {
+      window.requireAuth(null, "Log in to post comments.");
+    } else {
+      alert("You must be logged in to comment.");
+    }
+    return;
+  }
+
+  // Проверка мута
+  if (window.myProfile.muted_until && new Date(window.myProfile.muted_until) > new Date()) {
+    if (typeof Swal !== 'undefined') {
+      Swal.fire({
+        title: 'MUTED',
+        text: 'You are muted and cannot leave comments.',
+        icon: 'error',
+        customClass: { popup: 'nfs-crt-modal' }
+      });
+    } else {
+      alert('You are muted and cannot leave comments.');
+    }
+    return;
+  }
+
   const input = document.getElementById('commentText');
   const text = input ? input.value.trim() : '';
-  if (!text || !currentUserId) return;
+  if (!text) return;
 
-  // 1. Додаємо коментар до таблиці forum_comments
+  // 1. Добавляем комментарий
   const { error: commentErr } = await _supabase.from('forum_comments').insert([
     { topic_id: topicId, content: text, author_name: myName }
   ]);
@@ -154,12 +234,11 @@ window.postComment = async () => {
   input.value = '';
   await loadComments();
 
-  // 2. Сповіщення надсилається ТІЛЬКИ якщо була адресована відповідь [reply:Username]
+  // 2. Уведомление адресату [reply:Username]
   const replyMatch = text.match(/\[reply:\s*([^\]]+)\]/i);
   if (replyMatch) {
     const targetUsername = replyMatch[1].trim();
 
-    // Перевірка: не надсилати сповіщення самому собі
     if (targetUsername.toLowerCase() !== myName.toLowerCase()) {
       const { data: targetUser, error: userErr } = await _supabase
         .from('profiles')
@@ -183,8 +262,6 @@ window.postComment = async () => {
 
         if (notifErr) {
           console.error('Notification error (reply):', notifErr);
-        } else {
-          console.log(`Notification sent to @${targetUser.username}`);
         }
       }
     }
@@ -192,6 +269,8 @@ window.postComment = async () => {
 };
 
 window.confirmDeleteTopic = async () => {
+  if (!currentUserId || window.myProfile?.isGuest) return;
+
   const result = await Swal.fire({
     title: 'Are you sure to delete this topic?',
     html: `<span class="user-text-content" style="font-family: 'Arial', sans-serif; font-size: 1rem; color: #aaa;">This topic will disappear from the archives forever!</span>`,
@@ -201,7 +280,7 @@ window.confirmDeleteTopic = async () => {
     cancelButtonText: 'CANCEL',
     background: '#0a0a0a',
     color: '#fff',
-    customClass: {popup: 'nfs-crt-modal'}
+    customClass: { popup: 'nfs-crt-modal' }
   });
 
   if (result.isConfirmed) {
@@ -211,9 +290,9 @@ window.confirmDeleteTopic = async () => {
 };
 
 window.editTopic = async () => {
-  if (!topicData) return;
+  if (!topicData || !currentUserId || window.myProfile?.isGuest) return;
 
-  const {value: formValues} = await Swal.fire({
+  const { value: formValues } = await Swal.fire({
     title: 'EDIT THIS TOPIC',
     background: '#0a0a0a',
     color: '#fff',
@@ -223,7 +302,7 @@ window.editTopic = async () => {
     confirmButtonText: 'SAVE CHANGES',
     showCancelButton: true,
     cancelButtonText: 'CANCEL',
-    customClass: {popup: 'nfs-crt-modal'},
+    customClass: { popup: 'nfs-crt-modal' },
     preConfirm: () => ({
       title: document.getElementById('swal-title').value.trim(),
       content: document.getElementById('swal-content').value.trim()
@@ -231,8 +310,8 @@ window.editTopic = async () => {
   });
 
   if (formValues) {
-    const {error} = await _supabase.from('forum_topics')
-      .update({title: formValues.title, content: formValues.content})
+    const { error } = await _supabase.from('forum_topics')
+      .update({ title: formValues.title, content: formValues.content })
       .eq('id', topicId);
 
     if (!error) loadFullTopic();
@@ -245,6 +324,16 @@ window.updateFriendsStatusOnly = function () {
 };
 
 window.insertReplyTag = function (authorName) {
+  // Защита от клика гостя по кнопке ответа
+  if (!window.myProfile || window.myProfile.isGuest || !currentUserId) {
+    if (typeof window.requireAuth === 'function') {
+      window.requireAuth(null, "Log in to reply to comments.");
+    } else {
+      alert("Please log in to reply.");
+    }
+    return;
+  }
+
   const textarea = document.getElementById('commentText');
   if (!textarea) return;
   textarea.value = `[reply:${authorName.trim()}] ${textarea.value}`;

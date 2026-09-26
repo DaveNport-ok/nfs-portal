@@ -1,4 +1,4 @@
-import {_supabase} from '../config.js';
+import { _supabase } from '../config.js';
 import '../widgets.js';
 import '../global.js';
 
@@ -11,37 +11,48 @@ let allRacers = [];
 let currentPage = 1;
 const perPage = 10;
 
+// Защита от XSS-инъекций в никнеймах
+function escapeHtml(text) {
+  if (!text) return '';
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
 window.updateFriendsStatusOnly = function () {
   loadBlacklist();
 };
 
 window.onload = async () => {
-  const {data: {user}} = await _supabase.auth.getUser();
+  const { data: { user } } = await _supabase.auth.getUser();
+
+  const loginBtn = document.getElementById('loginBtn');
+  const userInfo = document.getElementById('userInfo');
+  const nickEl = document.getElementById('displayNick');
 
   if (user) {
+    // 1. АВТОРИЗОВАННЫЙ ГОНЩИК
     currentUserId = user.id;
     window.currentUserId = user.id;
-    const {data: p} = await _supabase.from('profiles').select('*').eq('id', user.id).single();
+
+    const { data: p } = await _supabase.from('profiles').select('*').eq('id', user.id).single();
 
     if (p) {
+      p.isGuest = false;
       myProfile = p;
       window.myProfile = p;
       myUsername = p.username;
 
-      const nickEl = document.getElementById('displayNick');
       if (nickEl) nickEl.innerText = p.username;
-
-      const loginBtn = document.getElementById('loginBtn');
-      const userInfo = document.getElementById('userInfo');
       if (loginBtn) loginBtn.style.display = 'none';
       if (userInfo) userInfo.style.display = 'flex';
 
       if (typeof initGlobalStatus === 'function') initGlobalStatus(_supabase, p);
       if (typeof updateGlobalMsgBadge === 'function') updateGlobalMsgBadge(_supabase, user.id);
       if (typeof updateFriendNotifications === 'function') updateFriendNotifications();
+      if (typeof checkAdminReplies === 'function') checkAdminReplies();
 
-      checkAdminReplies();
-
+      // Слушатели личных каналов
       _supabase.channel('leaderboard-msg-updates')
         .on('postgres_changes', {
           event: 'INSERT',
@@ -60,7 +71,7 @@ window.onload = async () => {
           table: 'support_tickets',
           filter: `user_id=eq.${user.id}`
         }, (payload) => {
-          checkAdminReplies();
+          if (typeof checkAdminReplies === 'function') checkAdminReplies();
           if (payload.new.status === 'resolved' && !payload.new.is_read) {
             if (typeof playNotificationSound === 'function') playNotificationSound();
           }
@@ -68,19 +79,46 @@ window.onload = async () => {
         .subscribe();
     }
   } else {
+    // 2. ГОСТЕВОЙ РЕЖИМ
+    myProfile = {
+      id: null,
+      username: 'Guest_' + Math.random().toString(36).substring(2, 6),
+      isGuest: true,
+      status: 'GUEST',
+      avatar_url: 'https://via.placeholder.com/34?text=G'
+    };
+    window.myProfile = myProfile;
+    window.currentUserId = null;
+    myUsername = "";
+
+    // Показываем кнопку входа и прячем данные авторизованного профиля
+    if (loginBtn) {
+      loginBtn.style.display = 'inline-block';
+      loginBtn.href = 'auth.html';
+    }
+    if (userInfo) userInfo.style.display = 'none';
+    if (nickEl) {
+      nickEl.innerText = 'GUEST';
+      nickEl.style.color = '#888';
+    }
+
     if (typeof initGlobalStatus === 'function') initGlobalStatus(_supabase, null);
   }
 
+  // Загрузка таблицы лидеров (доступна всем)
   await loadBlacklist();
 };
 
 async function loadBlacklist() {
-  const {data, error} = await _supabase
+  const { data, error } = await _supabase
     .from('profiles')
     .select('*')
-    .order('rating', {ascending: false});
+    .order('rating', { ascending: false });
 
-  if (error) return;
+  if (error) {
+    console.error('Failed to load blacklist:', error);
+    return;
+  }
 
   allRacers = data || [];
   renderLeaderboard();
@@ -92,13 +130,19 @@ function renderLeaderboard() {
   if (!tbody) return;
   tbody.innerHTML = '';
 
+  if (allRacers.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; padding: 25px; color: #666;">No racers registered yet.</td></tr>`;
+    return;
+  }
+
   const startIndex = (currentPage - 1) * perPage;
   const endIndex = startIndex + perPage;
   const pageData = allRacers.slice(startIndex, endIndex);
 
   pageData.forEach((racer, index) => {
     const rank = startIndex + index + 1;
-    const isMe = myUsername === racer.username;
+    // (YOU) отображается только для авторизованного пользователя
+    const isMe = !myProfile?.isGuest && myUsername !== "" && myUsername === racer.username;
     const presence = (typeof onlineUsers !== 'undefined') ? onlineUsers[racer.username] : null;
 
     let statusText = "OFFLINE";
@@ -111,7 +155,7 @@ function renderLeaderboard() {
 
       if (pData.status === 'IN-GAME') {
         statusText = 'IN-GAME';
-        borderColor = 'var(--nfs-yellow)';
+        borderColor = 'var(--nfs-yellow, #f1c40f)';
       } else {
         statusText = 'ONLINE';
         borderColor = '#2ecc71';
@@ -119,6 +163,7 @@ function renderLeaderboard() {
     }
 
     const avatarStyle = `border: 2px solid ${borderColor}; transition: border-color 0.3s;`;
+    const safeUsername = escapeHtml(racer.username);
 
     const avatarHTML = racer.avatar_url
       ? `<img src="${racer.avatar_url}" class="racer-avatar" style="${avatarStyle}">`
@@ -136,7 +181,7 @@ function renderLeaderboard() {
       row.style.background = "rgba(255, 255, 255, 0.08)";
     }
 
-    row.onclick = () => window.location.href = `profile.html?u=${racer.username}`;
+    row.onclick = () => window.location.href = `profile.html?u=${encodeURIComponent(racer.username)}`;
 
     row.innerHTML = `
       <td class="rank-num ${rankClass}">
@@ -149,10 +194,10 @@ function renderLeaderboard() {
       </td>
       <td>
         <span class="racer-name ${racer.is_admin ? 'admin-name' : ''}">
-          ${racer.username} ${isMe ? '<small style="color:var(--nfs-yellow); font-size: 0.6rem;">(YOU)</small>' : ''}
+          ${safeUsername} ${isMe ? '<small style="color:var(--nfs-yellow, #f1c40f); font-size: 0.6rem;">(YOU)</small>' : ''}
         </span>
       </td>
-      <td style="font-weight: bold; color: var(--nfs-yellow); font-size: 1.1rem;">
+      <td style="font-weight: bold; color: var(--nfs-yellow, #f1c40f); font-size: 1.1rem;">
         ${(racer.rating || 0).toLocaleString()}
       </td>
       <td>

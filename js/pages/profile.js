@@ -10,47 +10,67 @@ window.profileData = null;
 
 window.onload = async () => {
   const { data: { user } } = await _supabase.auth.getUser();
-  if (!user) {
-    window.location.href = 'auth.html';
-    return;
-  }
-  window.currentUserId = user.id;
 
-  const { data: me } = await _supabase.from('profiles').select('*').eq('id', window.currentUserId).single();
-  if (me) {
-    window.myProfile = me;
+  if (user) {
+    // 1. АВТОРИЗОВАННЫЙ ПОЛЬЗОВАТЕЛЬ
+    window.currentUserId = user.id;
 
-    if (typeof checkDailyBonus === 'function') await checkDailyBonus(me);
+    const { data: me } = await _supabase.from('profiles').select('*').eq('id', window.currentUserId).single();
+    if (me) {
+      me.isGuest = false;
+      window.myProfile = me;
 
-    const savedStatus = localStorage.getItem('driver_status') || me.status || 'ONLINE';
-    window.myProfile.status = savedStatus;
+      if (typeof checkDailyBonus === 'function') await checkDailyBonus(me);
 
-    await _supabase.from('profiles').update({ status: savedStatus }).eq('id', user.id);
-    if (typeof window.trackMyStatus === 'function') await window.trackMyStatus(savedStatus);
+      const savedStatus = localStorage.getItem('driver_status') || me.status || 'ONLINE';
+      window.myProfile.status = savedStatus;
+
+      await _supabase.from('profiles').update({ status: savedStatus }).eq('id', user.id);
+      if (typeof window.trackMyStatus === 'function') await window.trackMyStatus(savedStatus);
+
+      const nickEl = document.getElementById('displayNick');
+      if (nickEl) nickEl.innerText = me.username;
+      if (typeof updateFriendNotifications === 'function') updateFriendNotifications();
+      if (typeof initGlobalStatus === 'function') initGlobalStatus(_supabase, me);
+      if (typeof updateGlobalMsgBadge === 'function') updateGlobalMsgBadge(_supabase, me.id);
+      if (typeof checkAdminReplies === 'function') checkAdminReplies();
+
+      // Слушатель тикетов только для реального аккаунта
+      _supabase.channel('support-realtime')
+        .on('postgres_changes', {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'support_tickets',
+          filter: `user_id=eq.${me.id}`
+        }, (payload) => {
+          if (typeof checkAdminReplies === 'function') checkAdminReplies();
+          if (payload.new.status === 'resolved' && !payload.new.is_read) {
+            if (typeof playNotificationSound === 'function') playNotificationSound();
+          }
+        })
+        .subscribe();
+    }
+  } else {
+    // 2. ГОСТЕВОЙ РЕЖИМ
+    window.currentUserId = null;
+    window.myProfile = {
+      id: null,
+      username: 'Guest_' + Math.random().toString(36).substring(2, 6),
+      isGuest: true,
+      status: 'GUEST',
+      avatar_url: 'https://via.placeholder.com/34?text=G'
+    };
 
     const nickEl = document.getElementById('displayNick');
-    if (nickEl) nickEl.innerText = me.username;
-    if (typeof updateFriendNotifications === 'function') updateFriendNotifications();
-    if (typeof initGlobalStatus === 'function') initGlobalStatus(_supabase, me);
-    if (typeof updateGlobalMsgBadge === 'function') updateGlobalMsgBadge(_supabase, me.id);
+    if (nickEl) {
+      nickEl.innerText = 'GUEST';
+      nickEl.style.color = '#888';
+    }
 
-    if (typeof checkAdminReplies === 'function') checkAdminReplies();
-
-    _supabase.channel('support-realtime')
-      .on('postgres_changes', {
-        event: 'UPDATE',
-        schema: 'public',
-        table: 'support_tickets',
-        filter: `user_id=eq.${me.id}`
-      }, (payload) => {
-        if (typeof checkAdminReplies === 'function') checkAdminReplies();
-        if (payload.new.status === 'resolved' && !payload.new.is_read) {
-          if (typeof playNotificationSound === 'function') playNotificationSound();
-        }
-      })
-      .subscribe();
+    if (typeof initGlobalStatus === 'function') initGlobalStatus(_supabase, null);
   }
 
+  // ОПРЕДЕЛЕНИЕ СТРАНИЦЫ (ЧУЖОЙ ПРОФИЛЬ ИЛИ СВОЙ)
   const urlParams = new URLSearchParams(window.location.search);
   const targetName = urlParams.get('u');
 
@@ -59,25 +79,139 @@ window.onload = async () => {
     if (data) {
       window.profileData = data;
       setupProfileRealtimeListener();
-      renderFullProfile(data, data.id === window.currentUserId);
+      const isMine = window.currentUserId && data.id === window.currentUserId;
+      renderFullProfile(data, isMine);
       updateRacerRank(data.id);
       checkFriendshipStatus(data.id);
     } else {
-      await loadMyOwnProfile(user.id);
-      checkFriendshipStatus(user.id);
+      if (window.myProfile?.isGuest) {
+        renderGuestSelfProfile();
+      } else if (window.currentUserId) {
+        await loadMyOwnProfile(window.currentUserId);
+        checkFriendshipStatus(window.currentUserId);
+      }
     }
   } else {
-    await loadMyOwnProfile(user.id);
-    checkFriendshipStatus(user.id);
+    if (window.myProfile?.isGuest) {
+      renderGuestSelfProfile();
+    } else if (window.currentUserId) {
+      await loadMyOwnProfile(window.currentUserId);
+      checkFriendshipStatus(window.currentUserId);
+    }
   }
 };
+
+/**
+ * Отрисовка страницы, если гость открыл собственный профиль (без ?u=)
+ */
+function renderGuestSelfProfile() {
+  const nameEl = document.getElementById('profName');
+  const badgeEl = document.getElementById('badgeContainer');
+  const bioEl = document.getElementById('profBio');
+  const ratingEl = document.getElementById('profRating');
+  const levelEl = document.getElementById('profLevel');
+  const rankEl = document.getElementById('rankDisplay');
+  const box = document.getElementById('avatarBox');
+  const statusEl = document.getElementById('statusIndicator');
+
+  if (nameEl) {
+    nameEl.innerText = "GUEST DRIVER";
+    nameEl.classList.remove('admin-glow', 'vip-glow');
+  }
+
+  // Значок гостя не отображаем
+  if (badgeEl) {
+    badgeEl.innerHTML = '';
+  }
+
+  if (bioEl) {
+    bioEl.innerHTML = `
+      You are browsing as a guest.
+      <a href="auth.html" style="color: var(--nfs-yellow, #f1c40f); font-weight: bold; text-decoration: none;">Log in</a>
+      or create an account to unlock your career, garage, and leaderboard rank.
+    `;
+  }
+
+  if (ratingEl) ratingEl.innerText = '★ 0';
+  if (levelEl) levelEl.innerText = '—';
+  if (rankEl) rankEl.innerText = '(UNRANKED)';
+
+  if (box) {
+    box.innerHTML = `<span class="avatar-letter" style="color: #666;">?</span>`;
+  }
+
+  if (statusEl) {
+    statusEl.innerHTML = '<div>GUEST MODE</div>';
+    statusEl.className = 'status-badge status-offline';
+  }
+
+  // Скрываем все кнопки действий
+  const editBtn = document.getElementById('editBtn');
+  const statusSelect = document.getElementById('statusSelect');
+  const addCarBtn = document.getElementById('addCarBtn');
+  const msgBtn = document.getElementById('msgBtn');
+  const friendBtn = document.getElementById('friendBtn');
+  const adminMuteBtn = document.getElementById('adminMuteBtn');
+
+  if (editBtn) editBtn.classList.add('hidden');
+  if (statusSelect) statusSelect.classList.add('hidden');
+  if (addCarBtn) addCarBtn.classList.add('hidden');
+  if (msgBtn) msgBtn.classList.add('hidden');
+  if (friendBtn) friendBtn.classList.add('hidden');
+  if (adminMuteBtn) adminMuteBtn.classList.add('hidden');
+
+  // Контрастный и читаемый блок закрытого гаража
+  const garage = document.getElementById('garageContainer');
+  if (garage) {
+    garage.innerHTML = `
+      <div style="
+        text-align: center;
+        padding: 35px 20px;
+        background: rgba(10, 10, 12, 0.85);
+        border: 1px solid rgba(241, 196, 15, 0.35);
+        box-shadow: 0 8px 30px rgba(0, 0, 0, 0.9);
+        backdrop-filter: blur(8px);
+        margin: 20px auto;
+        max-width: 480px;
+      ">
+        <p style="
+          color: #fff;
+          font-size: 0.95rem;
+          letter-spacing: 1px;
+          text-transform: uppercase;
+          text-shadow: 0 2px 6px rgba(0, 0, 0, 0.9);
+          margin: 0 0 16px 0;
+          font-weight: 600;
+        ">
+          Personal garage is locked for guests.
+        </p>
+        <a href="auth.html" class="nfs-font" style="
+          display: inline-block;
+          color: var(--nfs-yellow, #f1c40f);
+          border: 1px solid var(--nfs-yellow, #f1c40f);
+          padding: 8px 20px;
+          text-decoration: none;
+          font-size: 0.8rem;
+          font-weight: bold;
+          letter-spacing: 1.5px;
+          background: rgba(0, 0, 0, 0.6);
+          transition: 0.2s;
+        "
+        onmouseover="this.style.background='var(--nfs-yellow, #f1c40f)'; this.style.color='#000';"
+        onmouseout="this.style.background='rgba(0, 0, 0, 0.6)'; this.style.color='var(--nfs-yellow, #f1c40f)';">
+          JOIN SAFE-HOUSE
+        </a>
+      </div>
+    `;
+  }
+}
 
 window.updateLiveStatusUI = function () {
   const el = document.getElementById('statusIndicator');
   if (!el || !window.profileData) return;
 
   const presence = (typeof onlineUsers !== 'undefined' ? onlineUsers[window.profileData.username] : null);
-  const isItMe = (window.myProfile && window.profileData.id === window.myProfile.id);
+  const isItMe = (!window.myProfile?.isGuest && window.myProfile && window.profileData.id === window.myProfile.id);
 
   let s = 'ONLINE';
   if (isItMe) {
@@ -144,12 +278,8 @@ function getMuteRemainingText(mutedUntilDate) {
   const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
   const remainingMinutes = totalMinutes % 60;
 
-  if (days > 0) {
-    return `${days} d. ${hours} h.`;
-  }
-  if (hours > 0) {
-    return `${hours} h. ${remainingMinutes} min.`;
-  }
+  if (days > 0) return `${days} d. ${hours} h.`;
+  if (hours > 0) return `${hours} h. ${remainingMinutes} min.`;
   return `${remainingMinutes} min.`;
 }
 
@@ -212,7 +342,7 @@ function renderFullProfile(data, isMine) {
 
   const adminMuteBtn = document.getElementById('adminMuteBtn');
   if (adminMuteBtn) {
-    if (window.myProfile && window.myProfile.is_admin && !isMine) {
+    if (window.myProfile && !window.myProfile.isGuest && window.myProfile.is_admin && !isMine) {
       adminMuteBtn.classList.remove('hidden');
       adminMuteBtn.innerText = isMuted ? 'UNMUTE / EXTEND' : 'MUTE USER';
     } else {
@@ -246,7 +376,7 @@ function renderFullProfile(data, isMine) {
     if (el) el.style.display = '';
   });
 
-  if (isMine) {
+  if (isMine && !window.myProfile?.isGuest) {
     if (editBtn) editBtn.classList.remove('hidden');
     if (addCarBtn) addCarBtn.classList.remove('hidden');
     if (statusSelect) {
@@ -273,7 +403,7 @@ function renderFullProfile(data, isMine) {
 function renderGarage(photos) {
   const container = document.getElementById('garageContainer');
   if (!container) return;
-  container.innerHTML = photos?.length ? '' : '<p style="color:#555">Avoid...</p>';
+  container.innerHTML = photos?.length ? '' : '<p style="color:#aaa; font-style:italic; padding: 15px 0;">Garage is empty...</p>';
   photos?.forEach((url) => {
     container.innerHTML += `<div class="car-card" onclick="viewFullImage('${url}')"><img src="${url}"></div>`;
   });
@@ -290,6 +420,7 @@ window.viewFullImage = (url) => {
 };
 
 window.handleAvatarClick = () => {
+  if (window.myProfile?.isGuest) return;
   const isMine = window.myProfile && window.profileData && (window.myProfile.id === window.profileData.id);
   if (isMine) {
     document.getElementById('avatarFileInput')?.click();
@@ -297,6 +428,7 @@ window.handleAvatarClick = () => {
 };
 
 window.handleAvatarFileSelected = async (event) => {
+  if (window.myProfile?.isGuest || !window.currentUserId) return;
   const file = event.target.files[0];
   if (!file) return;
 
@@ -370,6 +502,7 @@ window.handleAvatarFileSelected = async (event) => {
 };
 
 window.handleCarFileSelected = async (event) => {
+  if (window.myProfile?.isGuest || !window.currentUserId) return;
   const file = event.target.files[0];
   if (!file) return;
 
@@ -446,6 +579,7 @@ window.handleCarFileSelected = async (event) => {
 };
 
 window.updateUserStatus = async () => {
+  if (window.myProfile?.isGuest || !window.currentUserId) return;
   const s = document.getElementById('statusSelect').value;
   localStorage.setItem('driver_status', s);
 
@@ -461,6 +595,8 @@ window.updateUserStatus = async () => {
 };
 
 window.openEditProfile = async () => {
+  if (window.myProfile?.isGuest || !window.currentUserId) return;
+
   const frames = [{ id: 'frame-default', name: 'Standart' }, { id: 'frame-mw', name: 'Most Wanted' }];
   let framesHtml = '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 15px;">';
   frames.forEach(f => {
@@ -511,6 +647,30 @@ async function checkFriendshipStatus(targetUserId) {
   const btn = document.getElementById('friendBtn');
   const msgBtn = document.getElementById('msgBtn');
 
+  // Если гость просматривает чужой профиль
+  if (window.myProfile?.isGuest) {
+    if (btn) {
+      btn.classList.remove('hidden');
+      btn.innerText = "ADD TO FRIENDS";
+      btn.disabled = false;
+      btn.onclick = () => {
+        if (typeof window.requireAuth === 'function') {
+          window.requireAuth(null, "Log in to add racers to your friend list.");
+        }
+      };
+    }
+    if (msgBtn) {
+      msgBtn.classList.remove('hidden');
+      msgBtn.onclick = () => {
+        if (typeof window.requireAuth === 'function') {
+          window.requireAuth(null, "Log in to send direct messages.");
+        }
+      };
+    }
+    return;
+  }
+
+  // Если это собственный профиль
   if (!window.myProfile || targetUserId === window.myProfile.id) {
     if (btn) btn.classList.add('hidden');
     if (msgBtn) msgBtn.classList.add('hidden');
@@ -555,6 +715,7 @@ async function checkFriendshipStatus(targetUserId) {
 }
 
 async function sendFriendRequest(targetId) {
+  if (window.myProfile?.isGuest) return;
   await _supabase.from('notifications').insert([{
     sender_id: window.myProfile.id,
     receiver_id: targetId,
@@ -564,17 +725,19 @@ async function sendFriendRequest(targetId) {
 }
 
 async function acceptFriendRequest(requestId) {
+  if (window.myProfile?.isGuest) return;
   await _supabase.from('notifications').update({ status: 'accepted' }).eq('id', requestId);
   location.reload();
 }
 
 async function removeFriend(requestId) {
+  if (window.myProfile?.isGuest) return;
   await _supabase.from('notifications').delete().eq('id', requestId);
   location.reload();
 }
 
 window.openMuteModal = async () => {
-  if (!window.myProfile || !window.myProfile.is_admin || !window.profileData) return;
+  if (!window.myProfile || window.myProfile.isGuest || !window.myProfile.is_admin || !window.profileData) return;
 
   const isCurrentlyMuted = window.profileData.muted_until && new Date(window.profileData.muted_until) > new Date();
 
@@ -657,7 +820,7 @@ function setupProfileRealtimeListener() {
     }, (payload) => {
       window.profileData = payload.new;
       const currentLocal = localStorage.getItem('driver_status') || 'ONLINE';
-      if (window.myProfile && payload.new.id === window.myProfile.id) {
+      if (window.myProfile && !window.myProfile.isGuest && payload.new.id === window.myProfile.id) {
         window.profileData.status = currentLocal;
       }
       renderFullProfile(window.profileData, window.profileData.id === window.currentUserId);
@@ -668,5 +831,11 @@ function setupProfileRealtimeListener() {
 
 window.goToChat = function(username) {
   if (!username) return;
+  if (window.myProfile?.isGuest) {
+    if (typeof window.requireAuth === 'function') {
+      window.requireAuth(null, "Log in to chat with other drivers.");
+    }
+    return;
+  }
   window.location.href = `chats.html?to=${username}`;
 };

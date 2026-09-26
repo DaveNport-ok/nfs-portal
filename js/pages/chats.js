@@ -1,4 +1,4 @@
-import {_supabase} from '../config.js';
+import { _supabase } from '../config.js';
 import '../widgets.js';
 import '../global.js';
 
@@ -13,23 +13,46 @@ let selectedFile = null;
 let isSending = false;
 
 window.onload = async () => {
-  const {data: {user}} = await _supabase.auth.getUser();
-  if (!user) {
-    window.location.href = 'auth.html';
-    return;
-  }
+  const { data: { user } } = await _supabase.auth.getUser();
 
-  const {data: profile} = await _supabase.from('profiles').select('*').eq('id', user.id).single();
-  if (profile) {
-    myProfile = profile;
-    window.myProfile = profile;
-    window.currentUserId = user.id;
+  if (user) {
+    // 1. АВТОРИЗОВАННЫЙ ПОЛЬЗОВАТЕЛЬ
+    const { data: profile } = await _supabase.from('profiles').select('*').eq('id', user.id).single();
+    if (profile) {
+      profile.isGuest = false;
+      myProfile = profile;
+      window.myProfile = profile;
+      window.currentUserId = user.id;
+
+      const nickEl = document.getElementById('displayNick');
+      if (nickEl) nickEl.innerText = myProfile.username;
+
+      if (typeof updateFriendNotifications === 'function') updateFriendNotifications();
+      if (typeof initGlobalStatus === 'function') initGlobalStatus(_supabase, myProfile);
+      if (typeof updateGlobalMsgBadge === 'function') updateGlobalMsgBadge(_supabase, myProfile.id);
+    }
+  } else {
+    // 2. ГОСТЕВОЙ РЕЖИМ (не выгоняем на auth.html, даем смотреть публичный чат)
+    myProfile = {
+      id: null,
+      username: 'Guest_' + Math.random().toString(36).substring(2, 6),
+      isGuest: true,
+      status: 'GUEST',
+      avatar_url: 'https://via.placeholder.com/34?text=G'
+    };
+    window.myProfile = myProfile;
+    window.currentUserId = null;
 
     const nickEl = document.getElementById('displayNick');
-    if (nickEl) nickEl.innerText = myProfile.username;
+    if (nickEl) {
+      nickEl.innerText = 'GUEST';
+      nickEl.style.color = '#888';
+    }
 
-    if (typeof updateFriendNotifications === 'function') updateFriendNotifications();
-    if (typeof initGlobalStatus === 'function') initGlobalStatus(_supabase, myProfile);
+    if (typeof initGlobalStatus === 'function') initGlobalStatus(_supabase, null);
+
+    // Блокируем поля отправки и инпуты для гостей
+    lockChatInputsForGuest();
   }
 
   await fetchSpecialRoles();
@@ -38,17 +61,44 @@ window.onload = async () => {
   const urlParams = new URLSearchParams(window.location.search);
   const targetName = urlParams.get('to');
 
-  if (targetName) {
+  // Гости могут читать только публичный чат
+  if (targetName && !myProfile.isGuest) {
     openChatFromURL(targetName);
   } else {
     await loadMessages();
   }
 
-  if (typeof updateGlobalMsgBadge === 'function') updateGlobalMsgBadge(_supabase, myProfile.id);
-
   subscribeToChanges();
   initTypingTracker();
 };
+
+/**
+ * Ограничение полей ввода чата для гостя
+ */
+function lockChatInputsForGuest() {
+  const chatInput = document.getElementById('chatInput');
+  const sendBtn = document.querySelector('.send-btn');
+  const attachBtn = document.getElementById('attachBtn');
+
+  if (chatInput) {
+    chatInput.disabled = true;
+    chatInput.placeholder = 'Chat is locked. Log in to start communication...';
+    chatInput.style.backgroundColor = '#111';
+    chatInput.style.cursor = 'not-allowed';
+  }
+
+  if (sendBtn) {
+    sendBtn.disabled = true;
+    sendBtn.style.opacity = '0.5';
+    sendBtn.style.cursor = 'not-allowed';
+    sendBtn.title = 'Authorization required';
+  }
+
+  if (attachBtn) {
+    attachBtn.style.pointerEvents = 'none';
+    attachBtn.style.opacity = '0.3';
+  }
+}
 
 function getStatusColor(username) {
   if (typeof onlineUsers === 'undefined' || !onlineUsers || !onlineUsers[username]) return '#555555';
@@ -58,19 +108,29 @@ function getStatusColor(username) {
 }
 
 async function fetchSpecialRoles() {
-  const {data} = await _supabase.from('profiles').select('id, username, is_admin, is_vip, avatar_url, status');
-  if (data) data.forEach(u => specialUsers[u.username] = {
-    id: u.id,
-    admin: u.is_admin,
-    vip: u.is_vip,
-    avatar: u.avatar_url,
-    status: u.status || 'OFFLINE',
-    username: u.username
-  });
+  const { data } = await _supabase.from('profiles').select('id, username, is_admin, is_vip, avatar_url, status');
+  if (data) {
+    data.forEach(u => specialUsers[u.username] = {
+      id: u.id,
+      admin: u.is_admin,
+      vip: u.is_vip,
+      avatar: u.avatar_url,
+      status: u.status || 'OFFLINE',
+      username: u.username
+    });
+  }
 }
 
-// File selection with 50 MB limit validation
+// Выбор файла с валидацией размера и проверкой на гостя
 window.handleFileSelected = function (event) {
+  if (myProfile?.isGuest) {
+    if (typeof window.requireAuth === 'function') {
+      window.requireAuth(null, "Log in to share files and screenshots.");
+    }
+    event.target.value = '';
+    return;
+  }
+
   const file = event.target.files[0];
   if (!file) return;
 
@@ -80,7 +140,7 @@ window.handleFileSelected = function (event) {
       title: 'FILE TOO LARGE',
       text: 'File size exceeds the 50 MB limit.',
       icon: 'error',
-      customClass: {popup: 'nfs-crt-modal'}
+      customClass: { popup: 'nfs-crt-modal' }
     });
     event.target.value = '';
     return;
@@ -95,13 +155,15 @@ window.handleFileSelected = function (event) {
   }
 };
 
-// Upload to Supabase Storage with a sanitized file name
+// Загрузка в Supabase Storage
 async function uploadChatAttachment(file) {
+  if (!myProfile || myProfile.isGuest) throw new Error("Unauthorized");
+
   const fileExt = file.name.split('.').pop() || 'bin';
   const cleanFileName = `${Date.now()}_${Math.random().toString(36).substring(2, 9)}.${fileExt.toLowerCase()}`;
   const filePath = `${myProfile.id}/${cleanFileName}`;
 
-  const {error} = await _supabase.storage
+  const { error } = await _supabase.storage
     .from('chat-attachments')
     .upload(filePath, file, {
       cacheControl: '3600',
@@ -110,7 +172,7 @@ async function uploadChatAttachment(file) {
 
   if (error) throw error;
 
-  const {data} = _supabase.storage
+  const { data } = _supabase.storage
     .from('chat-attachments')
     .getPublicUrl(filePath);
 
@@ -118,15 +180,28 @@ async function uploadChatAttachment(file) {
 }
 
 async function loadRecentDMs() {
-  if (!myProfile) return;
   const container = document.getElementById('dmListContainer');
   if (!container) return;
 
+  // Если зашел гость — показываем заглушку в списке личных сообщений
+  if (!myProfile || myProfile.isGuest) {
+    container.innerHTML = `
+    <div style="padding: 25px 15px; text-align: center; color: #666; font-size: 0.75rem;">
+      <div style="color: #cca609; font-weight: bold; margin-bottom: 8px;">PRIVATE FREQUENCY</div>
+      <div style="font-family: 'Arial', 'Helvetica', sans-serif !important; font-size: 0.8rem; line-height: 1.4; letter-spacing: normal; text-transform: none; color: #888;">
+        Direct messages are available to registered drivers only.
+      </div>
+      <a href="auth.html" style="color: var(--nfs-yellow, #f1c40f); font-weight: bold; text-decoration: none; display: inline-block; margin-top: 10px;">LOG IN</a>
+    </div>
+  `;
+    return;
+  }
+
   try {
-    const {data, error} = await _supabase.from('direct_messages')
+    const { data, error } = await _supabase.from('direct_messages')
       .select('*')
       .or(`sender_id.eq.${myProfile.id},receiver_id.eq.${myProfile.id}`)
-      .order('created_at', {ascending: false});
+      .order('created_at', { ascending: false });
 
     if (error) throw error;
 
@@ -138,7 +213,7 @@ async function loadRecentDMs() {
 
         if (otherId && otherId !== myProfile.id) {
           if (!contacts.has(otherId)) {
-            const uData = specialUsers[otherName] || {avatar: null};
+            const uData = specialUsers[otherName] || { avatar: null };
             contacts.set(otherId, {
               name: otherName,
               avatar: uData.avatar,
@@ -162,18 +237,18 @@ async function loadRecentDMs() {
       const active = activeChatType === 'private' && String(activeChatId) === String(id);
 
       container.innerHTML += `
-<div id="chat-${id}" class="chat-item ${active ? 'active' : ''}" onclick="switchChat('${id}', '${val.name}', 'private')">
-  <div class="avatar-wrapper">
-    <div class="chat-avatar" style="border-width: 2px; border-color: ${borderColor};">
-      ${val.avatar ? `<img src="${val.avatar}">` : (val.name ? val.name[0] : 'U')}
-    </div>
-  </div>
-  <div class="chat-item-info">
-    <div style="font-weight: bold; color: #ffffff">${val.name}</div>
-    <div class="chat-item-preview-text">${val.lastMsg ? val.lastMsg.substring(0, 20) : ''}</div>
-  </div>
-  ${val.unreadCount > 0 ? `<div class="unread-badge">${val.unreadCount}</div>` : ''}
-</div>`;
+        <div id="chat-${id}" class="chat-item ${active ? 'active' : ''}" onclick="switchChat('${id}', '${val.name}', 'private')">
+          <div class="avatar-wrapper">
+            <div class="chat-avatar" style="border-width: 2px; border-color: ${borderColor};">
+              ${val.avatar ? `<img src="${val.avatar}">` : (val.name ? val.name[0] : 'U')}
+            </div>
+          </div>
+          <div class="chat-item-info">
+            <div style="font-weight: bold; color: #ffffff">${val.name}</div>
+            <div class="chat-item-preview-text">${val.lastMsg ? val.lastMsg.substring(0, 20) : ''}</div>
+          </div>
+          ${val.unreadCount > 0 ? `<div class="unread-badge">${val.unreadCount}</div>` : ''}
+        </div>`;
     });
   } catch (err) {
     console.error("Error loading DMs:", err);
@@ -181,6 +256,14 @@ async function loadRecentDMs() {
 }
 
 window.switchChat = async (id, name, type) => {
+  // Гость не может открывать личные чаты
+  if (type === 'private' && myProfile?.isGuest) {
+    if (typeof window.requireAuth === 'function') {
+      window.requireAuth(null, "Direct messages require racer authorization.");
+    }
+    return;
+  }
+
   activeChatId = id;
   activeChatType = type;
   targetUserName = name;
@@ -195,7 +278,9 @@ window.switchChat = async (id, name, type) => {
 
   if (type === 'private') {
     document.getElementById(`chat-${id}`)?.classList.add('active');
-    await _supabase.from('direct_messages').update({is_read: true}).eq('sender_id', id).eq('receiver_id', myProfile.id);
+    if (myProfile?.id) {
+      await _supabase.from('direct_messages').update({ is_read: true }).eq('sender_id', id).eq('receiver_id', myProfile.id);
+    }
   } else {
     document.getElementById('publicChatBtn')?.classList.add('active');
   }
@@ -204,8 +289,10 @@ window.switchChat = async (id, name, type) => {
   initTypingTracker();
 
   await loadMessages();
-  await loadRecentDMs();
-  if (typeof updateGlobalMsgBadge === 'function') updateGlobalMsgBadge(_supabase, myProfile.id);
+  if (!myProfile?.isGuest) {
+    await loadRecentDMs();
+    if (typeof updateGlobalMsgBadge === 'function') updateGlobalMsgBadge(_supabase, myProfile.id);
+  }
 };
 
 window.closeMobileChat = (e) => {
@@ -217,11 +304,18 @@ async function loadMessages() {
   const box = document.getElementById('msgBox');
   if (!box) return;
   box.innerHTML = '';
-  let query = activeChatType === 'public'
-    ? _supabase.from('messages').select('*').eq('room_id', 'global')
-    : _supabase.from('direct_messages').select('*').or(`and(sender_id.eq.${myProfile.id},receiver_id.eq.${activeChatId}),and(sender_id.eq.${activeChatId},receiver_id.eq.${myProfile.id})`);
 
-  const {data} = await query.order('created_at', {ascending: true});
+  let query = null;
+
+  if (activeChatType === 'public') {
+    query = _supabase.from('messages').select('*').eq('room_id', 'global');
+  } else if (!myProfile?.isGuest && myProfile?.id) {
+    query = _supabase.from('direct_messages').select('*').or(`and(sender_id.eq.${myProfile.id},receiver_id.eq.${activeChatId}),and(sender_id.eq.${activeChatId},receiver_id.eq.${myProfile.id})`);
+  } else {
+    return;
+  }
+
+  const { data } = await query.order('created_at', { ascending: true });
   if (data) data.forEach(m => renderSingleMessage(m));
 }
 
@@ -237,20 +331,23 @@ function renderSingleMessage(msg) {
   }
 
   const sender = msg.sender_name;
-  const isMine = (msg.sender_id && msg.sender_id === myProfile.id) || (sender === myProfile.username);
-  const userData = specialUsers[sender] || {admin: false, avatar: null};
-  const time = new Date(msg.created_at).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+  const isMine = (!myProfile?.isGuest && myProfile?.id && msg.sender_id === myProfile.id) ||
+    (!myProfile?.isGuest && sender === myProfile?.username);
+  const userData = specialUsers[sender] || { admin: false, avatar: null };
+  const time = new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const color = getStatusColor(sender);
 
   let actionTools = '';
-  if (isMine || myProfile?.is_admin) {
+  if (!myProfile?.isGuest && (isMine || myProfile?.is_admin)) {
     actionTools = `
       <span class="edit-btn" style="cursor:pointer; margin-left:6px; opacity:0.7;" onclick="editMessage('${msg.id}', '${activeChatType}')">[✎]</span>
       <span class="del-btn" style="cursor:pointer; margin-left:4px; opacity:0.7; color:#ff4757;" onclick="deleteMessage('${msg.id}', '${activeChatType}')">[X]</span>
     `;
   }
 
-  const avatarHTML = userData.avatar ? `<img src="${userData.avatar}" class="mini-avatar">` : `<div class="mini-avatar">${sender ? sender[0].toUpperCase() : 'U'}</div>`;
+  const avatarHTML = userData.avatar
+    ? `<img src="${userData.avatar}" class="mini-avatar">`
+    : `<div class="mini-avatar">${sender ? sender[0].toUpperCase() : 'U'}</div>`;
 
   let mediaHTML = '';
   if (msg.file_url) {
@@ -285,17 +382,21 @@ window.viewFullImage = (url) => {
     showConfirmButton: false,
     showCloseButton: true,
     width: 'auto',
-    customClass: {popup: 'nfs-crt-modal'}
+    customClass: { popup: 'nfs-crt-modal' }
   });
 };
 
 function initTypingTracker() {
   if (!myProfile) return;
-  const channelKey = activeChatType === 'public' ? 'global' : [myProfile.id, activeChatId].sort().join('-');
+
+  const channelKey = activeChatType === 'public'
+    ? 'global'
+    : (myProfile.isGuest ? 'guest' : [myProfile.id, activeChatId].sort().join('-'));
+
   typingChannel = _supabase.channel(`typing:${channelKey}`);
 
   typingChannel
-    .on('broadcast', {event: 'typing'}, (payload) => {
+    .on('broadcast', { event: 'typing' }, (payload) => {
       const userName = payload.payload.user;
       if (userName === myProfile.username) return;
 
@@ -309,15 +410,24 @@ function initTypingTracker() {
     })
     .subscribe();
 
+  // Только авторизованные гонщики отправляют индикатор набора текста
   const chatInput = document.getElementById('chatInput');
-  if (chatInput) {
+  if (chatInput && !myProfile.isGuest) {
     chatInput.oninput = () => {
-      typingChannel.send({type: 'broadcast', event: 'typing', payload: {user: myProfile.username}});
+      typingChannel.send({ type: 'broadcast', event: 'typing', payload: { user: myProfile.username } });
     };
   }
 }
 
 window.doSendMessage = async () => {
+  // Защита от гостей
+  if (!myProfile || myProfile.isGuest) {
+    if (typeof window.requireAuth === 'function') {
+      window.requireAuth(null, "Log in to broadcast messages in chat.");
+    }
+    return;
+  }
+
   if (isSending) return;
 
   const input = document.getElementById('chatInput');
@@ -354,7 +464,7 @@ window.doSendMessage = async () => {
 
     const table = activeChatType === 'public' ? 'messages' : 'direct_messages';
     const payload = activeChatType === 'public'
-      ? {sender_name: myProfile.username, text: text, file_url: fileUrl, room_id: 'global'}
+      ? { sender_name: myProfile.username, text: text, file_url: fileUrl, room_id: 'global' }
       : {
         sender_id: myProfile.id,
         receiver_id: activeChatId,
@@ -364,7 +474,7 @@ window.doSendMessage = async () => {
         file_url: fileUrl
       };
 
-    const {data, error} = await _supabase.from(table).insert([payload]).select();
+    const { data, error } = await _supabase.from(table).insert([payload]).select();
 
     if (error) throw error;
 
@@ -403,6 +513,8 @@ window.doSendMessage = async () => {
 };
 
 window.deleteMessage = async (id, type) => {
+  if (myProfile?.isGuest) return;
+
   const result = await Swal.fire({
     title: 'DELETE MESSAGE?',
     text: 'This action cannot be undone.',
@@ -412,20 +524,20 @@ window.deleteMessage = async (id, type) => {
     cancelButtonColor: '#333',
     confirmButtonText: 'Yes, delete',
     cancelButtonText: 'Cancel',
-    customClass: {popup: 'nfs-crt-modal'}
+    customClass: { popup: 'nfs-crt-modal' }
   });
 
   if (!result.isConfirmed) return;
 
   const table = (type === 'public') ? 'messages' : 'direct_messages';
-  const {error} = await _supabase.from(table).delete().eq('id', id);
+  const { error } = await _supabase.from(table).delete().eq('id', id);
 
   if (error) {
     Swal.fire({
       title: 'ERROR',
       text: error.message,
       icon: 'error',
-      customClass: {popup: 'nfs-crt-modal'}
+      customClass: { popup: 'nfs-crt-modal' }
     });
     return;
   }
@@ -435,18 +547,20 @@ window.deleteMessage = async (id, type) => {
 };
 
 window.editMessage = async (id, type) => {
+  if (myProfile?.isGuest) return;
+
   const msgEl = document.getElementById(`msg-${id}`);
   const textNode = msgEl ? msgEl.querySelector('.msg-text') : null;
   const currentText = textNode ? textNode.innerText : '';
 
-  const {value: newText} = await Swal.fire({
+  const { value: newText } = await Swal.fire({
     title: 'EDIT MESSAGE',
     input: 'textarea',
     inputValue: currentText,
     showCancelButton: true,
     confirmButtonText: 'SAVE',
     cancelButtonText: 'CANCEL',
-    customClass: {popup: 'nfs-crt-modal'},
+    customClass: { popup: 'nfs-crt-modal' },
     inputValidator: (value) => {
       if (!value || !value.trim()) {
         return 'Message text cannot be empty!';
@@ -457,14 +571,14 @@ window.editMessage = async (id, type) => {
   if (!newText || newText.trim() === currentText) return;
 
   const table = (type === 'public') ? 'messages' : 'direct_messages';
-  const {error} = await _supabase.from(table).update({text: newText.trim()}).eq('id', id);
+  const { error } = await _supabase.from(table).update({ text: newText.trim() }).eq('id', id);
 
   if (error) {
     Swal.fire({
       title: 'ERROR',
       text: error.message,
       icon: 'error',
-      customClass: {popup: 'nfs-crt-modal'}
+      customClass: { popup: 'nfs-crt-modal' }
     });
     return;
   }
@@ -474,68 +588,72 @@ window.editMessage = async (id, type) => {
 };
 
 function subscribeToChanges() {
+  // Публичный канал сообщений слушают ВСЕ, включая гостей
   _supabase.channel('msgs')
-    .on('postgres_changes', {event: 'INSERT', schema: 'public', table: 'messages'}, p => {
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, p => {
       if (activeChatType === 'public') renderSingleMessage(p.new);
     })
-    .on('postgres_changes', {event: 'UPDATE', schema: 'public', table: 'messages'}, p => {
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages' }, p => {
       if (activeChatType === 'public') {
         const textNode = document.querySelector(`#msg-${p.new.id} .msg-text`);
         if (textNode) textNode.innerText = p.new.text || '';
       }
     })
-    .on('postgres_changes', {event: 'DELETE', schema: 'public', table: 'messages'}, p => {
+    .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages' }, p => {
       document.getElementById(`msg-${p.old.id}`)?.remove();
     })
     .subscribe();
 
-  _supabase.channel('dms')
-    .on('postgres_changes', {
-      event: 'INSERT',
-      schema: 'public',
-      table: 'direct_messages'
-    }, async (p) => {
-      if (myProfile && (p.new.receiver_id === myProfile.id || p.new.sender_id === myProfile.id)) {
-        if (activeChatType === 'private' && (p.new.sender_id === activeChatId || p.new.sender_id === myProfile.id)) {
-          renderSingleMessage(p.new);
-          if (p.new.sender_id === activeChatId) {
-            await _supabase.from('direct_messages').update({is_read: true}).eq('id', p.new.id);
+  // Личные сообщения слушают ТОЛЬКО авторизованные пользователи
+  if (!myProfile?.isGuest && myProfile?.id) {
+    _supabase.channel('dms')
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'direct_messages'
+      }, async (p) => {
+        if (p.new.receiver_id === myProfile.id || p.new.sender_id === myProfile.id) {
+          if (activeChatType === 'private' && (p.new.sender_id === activeChatId || p.new.sender_id === myProfile.id)) {
+            renderSingleMessage(p.new);
+            if (p.new.sender_id === activeChatId) {
+              await _supabase.from('direct_messages').update({ is_read: true }).eq('id', p.new.id);
+            }
           }
+          await loadRecentDMs();
+          if (typeof updateGlobalMsgBadge === 'function') updateGlobalMsgBadge(_supabase, myProfile.id);
+        }
+      })
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'direct_messages'
+      }, async (p) => {
+        if (activeChatType === 'private') {
+          const textNode = document.querySelector(`#msg-${p.new.id} .msg-text`);
+          if (textNode) textNode.innerText = p.new.text || '';
         }
         await loadRecentDMs();
-        if (typeof updateGlobalMsgBadge === 'function') updateGlobalMsgBadge(_supabase, myProfile.id);
-      }
-    })
-    .on('postgres_changes', {
-      event: 'UPDATE',
-      schema: 'public',
-      table: 'direct_messages'
-    }, async (p) => {
-      if (activeChatType === 'private') {
-        const textNode = document.querySelector(`#msg-${p.new.id} .msg-text`);
-        if (textNode) textNode.innerText = p.new.text || '';
-      }
-      await loadRecentDMs();
-    })
-    .on('postgres_changes', {
-      event: 'DELETE',
-      schema: 'public',
-      table: 'direct_messages'
-    }, async (p) => {
-      document.getElementById(`msg-${p.old.id}`)?.remove();
-      await loadRecentDMs();
-    })
-    .subscribe();
+      })
+      .on('postgres_changes', {
+        event: 'DELETE',
+        schema: 'public',
+        table: 'direct_messages'
+      }, async (p) => {
+        document.getElementById(`msg-${p.old.id}`)?.remove();
+        await loadRecentDMs();
+      })
+      .subscribe();
+  }
 }
 
 async function openChatFromURL(targetName) {
-  if (!targetName) return;
+  if (!targetName || myProfile?.isGuest) return;
   if (Object.keys(specialUsers).length === 0) await fetchSpecialRoles();
   const racer = specialUsers[targetName];
   if (racer) {
     window.switchChat(racer.id, racer.username, 'private');
   } else {
-    const {data} = await _supabase.from('profiles').select('id, username').eq('username', targetName).maybeSingle();
+    const { data } = await _supabase.from('profiles').select('id, username').eq('username', targetName).maybeSingle();
     if (data) window.switchChat(data.id, data.username, 'private');
   }
 }
