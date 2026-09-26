@@ -110,10 +110,13 @@ async function loadFullTopic() {
 
   const dotHTML = getOnlineDotHTML(data.author_name);
   const dateObj = new Date(data.created_at);
-  const topicDate = `${dateObj.toLocaleDateString('ru-RU')}${dateObj.toLocaleTimeString('ru-RU', {
+  const topicDate = dateObj.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
     hour: '2-digit',
     minute: '2-digit'
-  })}`;
+  });
 
   document.getElementById('topicDetail').innerHTML = `
     <div class="main-topic" style="position: relative;">
@@ -156,10 +159,13 @@ async function loadComments() {
   if (data && data.length > 0) {
     data.forEach(c => {
       const dateObj = new Date(c.created_at);
-      const commentDate = `${dateObj.toLocaleDateString('ru-RU')}${dateObj.toLocaleTimeString('ru-RU', {
+      const commentDate = dateObj.toLocaleString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
         hour: '2-digit',
         minute: '2-digit'
-      })}`;
+      });
       const dotHTML = getOnlineDotHTML(c.author_name);
 
       list.innerHTML += `
