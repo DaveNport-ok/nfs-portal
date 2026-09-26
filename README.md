@@ -39,7 +39,6 @@ A retro-styled community hub and safe-house for street racers, inspired by the i
   - Supabase Storage (Avatars, attachments & car photos)
 
 ---
----
 
 ## Get started
 
