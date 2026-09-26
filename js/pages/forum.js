@@ -205,29 +205,28 @@ window.createNewTopic = async () => {
   isCreatingTopic = true;
 
   try {
-    const { error } = await _supabase.from('forum_topics').insert([{
-      title,
-      content,
-      author_name: myProfile.username,
-      author_id: myProfile.id,
-      category: 'game'
-    }]);
+    const { data, error } = await _supabase
+      .from('forum_topics')
+      .insert([{
+        title,
+        content,
+        author_name: myProfile.username,
+        author_id: myProfile.id,
+        category: 'game'
+      }])
+      .select('id')
+      .single();
 
     if (error) throw error;
 
-    if (titleInput) titleInput.value = '';
-    if (contentInput) contentInput.value = '';
-
-    if (typeof Swal !== 'undefined') {
-      Swal.fire({
-        title: 'SUCCESS',
-        text: 'Topic created successfully!',
-        icon: 'success',
-        customClass: { popup: 'nfs-crt-modal' }
-      });
+    // Мгновенный переход внутрь созданной темы
+    if (data?.id) {
+      window.location.href = `topic.html?id=${data.id}`;
+    } else {
+      if (titleInput) titleInput.value = '';
+      if (contentInput) contentInput.value = '';
+      await loadTopics();
     }
-
-    await loadTopics();
   } catch (err) {
     console.error('Failed to create topic:', err);
     if (typeof Swal !== 'undefined') {
