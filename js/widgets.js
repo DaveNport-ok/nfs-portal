@@ -454,20 +454,17 @@ async function refreshSteamFriendsList(supabaseClient, myProfile) {
       const liveStatus = pData.status || 'ONLINE';
       const avatarSrc = friend.avatar_url || 'https://via.placeholder.com/34';
 
-      if (liveStatus === 'IN-GAME' || pData.location === 'chats.html') {
+      if (liveStatus === 'IN-GAME') {
         playingCount++;
         dotColorClass = 'steam-text-ingame';
         borderClass = 'steam-border-ingame';
-
-        let statusText = 'IN-GAME';
-        if (pData.location === 'chats.html') statusText = 'IN CHAT';
 
         playingHTML += `
           <div class="steam-friend-row" onclick="window.location.href='profile.html?u=${friend.username}'">
             <img src="${avatarSrc}" class="steam-friend-avatar ${borderClass}">
             <div class="steam-friend-info">
               <span class="steam-friend-name ${dotColorClass}">${friend.username}</span>
-              <span class="steam-friend-status-text ${dotColorClass}">${statusText}</span>
+              <span class="steam-friend-status-text ${dotColorClass}">IN-GAME</span>
             </div>
           </div>
         `;
