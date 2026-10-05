@@ -9,12 +9,13 @@ let myName = "";
 let currentUserId = null;
 let topicData = null;
 let isPostingComment = false;
+let commentsRequestId = 0; // Защита от наложения параллельных запросов
 
 window.onload = async () => {
   const { data: { user } } = await _supabase.auth.getUser();
 
   if (user) {
-    // 1. АВТОРИЗОВАНИЙ КОРИСТУВАЧ
+    // 1. АВТОРИЗОВАННЫЙ ПОЛЬЗОВАТЕЛЬ
     currentUserId = user.id;
     window.currentUserId = user.id;
 
@@ -35,7 +36,7 @@ window.onload = async () => {
       }
     }
   } else {
-    // 2. ГОСТЬОВИЙ РЕЖИМ (не перенаправляємо, дозволяємо читання)
+    // 2. ГОСТЕВОЙ РЕЖИМ
     currentUserId = null;
     window.currentUserId = null;
     myName = "";
@@ -60,7 +61,7 @@ window.onload = async () => {
 };
 
 /**
- * Блокування форми коментування для гостей
+ * Блокировка формы комментирования для гостей
  */
 function lockCommentFormForGuest() {
   const textarea = document.getElementById('commentText');
@@ -109,7 +110,6 @@ async function loadFullTopic() {
   }
   topicData = data;
 
-  // Отримуємо аватар автора топіка (з запису топіка або з таблиці profiles)
   let authorAvatar = data.author_avatar || data.avatar_url || null;
   if (!authorAvatar && data.author_name) {
     const { data: prof } = await _supabase
@@ -159,7 +159,6 @@ async function loadFullTopic() {
     </div>
   `;
 
-  // Кнопки редагування і видалення топіка доступні тільки його автору
   if (currentUserId && currentUserId === data.author_id) {
     document.getElementById('authorControls')?.classList.remove('hidden');
   } else {
@@ -170,18 +169,19 @@ async function loadFullTopic() {
 async function loadComments() {
   if (!topicId) return;
 
-  const { data } = await _supabase.from('forum_comments')
+  const currentReq = ++commentsRequestId;
+
+  const { data, error } = await _supabase.from('forum_comments')
     .select('*')
     .eq('topic_id', topicId)
     .order('created_at', { ascending: true });
 
-  const list = document.getElementById('commentsList');
-  if (!list) return;
-  list.innerHTML = '<h3 style="border-bottom: 1px solid #222; padding-bottom: 10px; font-style: italic; font-size: 1.1rem; letter-spacing: 1px;">COMMENTS:</h3>';
+  if (error) {
+    console.error('Error loading comments:', error);
+    return;
+  }
 
-  const defaultAvatar = 'https://via.placeholder.com/20?text=R';
-
-  // Отримуємо аватарки всіх авторів коментарів одним запитом без зайвих дублів
+  // Загружаем аватарки авторов
   const avatarMap = {};
   if (data && data.length > 0) {
     const authorNames = [...new Set(data.map(c => c.author_name).filter(Boolean))];
@@ -201,6 +201,17 @@ async function loadComments() {
     }
   }
 
+  // Если пока шли сетевые запросы, запустился более свежий рендер — отменяем этот
+  if (currentReq !== commentsRequestId) return;
+
+  const list = document.getElementById('commentsList');
+  if (!list) return;
+
+  const defaultAvatar = 'https://via.placeholder.com/20?text=R';
+
+  // Собираем весь HTML в одну строку (никаких list.innerHTML += в цикле!)
+  let fullHTML = '<h3 style="border-bottom: 1px solid #222; padding-bottom: 10px; font-style: italic; font-size: 1.1rem; letter-spacing: 1px;">COMMENTS:</h3>';
+
   if (data && data.length > 0) {
     data.forEach(c => {
       const dateObj = new Date(c.created_at);
@@ -212,15 +223,11 @@ async function loadComments() {
         minute: '2-digit'
       });
       const dotHTML = getOnlineDotHTML(c.author_name);
-
-      // Визначаємо аватарку коментатора
       const commentAvatar = c.author_avatar || c.avatar_url || avatarMap[c.author_name?.toLowerCase()] || defaultAvatar;
 
-      // Перевірка прав: автор коментаря або адміністратор
       const isMine = !window.myProfile?.isGuest && myName && (c.author_name?.toLowerCase() === myName.toLowerCase());
       const canManage = isMine || Boolean(window.myProfile?.is_admin);
 
-      // Блок кнопок керування (карандаш і хрестик)
       const actionButtonsHTML = canManage ? `
         <span style="display: inline-flex; align-items: center; gap: 8px; margin-left: 10px;">
           <span
@@ -242,11 +249,9 @@ async function loadComments() {
         </span>
       ` : '';
 
-      list.innerHTML += `
+      fullHTML += `
         <div class="comment" id="comment-${c.id}" style="position: relative;">
           <div class="comment-meta" style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 12px;">
-
-             <!-- Лівий блок: аватарка + нікнейм + онлайн-крапка строго на одній лінії -->
              <div style="display: inline-flex; align-items: center; gap: 6px;">
                <img
                  src="${commentAvatar}"
@@ -264,8 +269,6 @@ async function loadComments() {
                </span>
                ${dotHTML}
              </div>
-
-             <!-- Правий блок: дата та кнопки дій -->
              <div style="display: inline-flex; align-items: center; gap: 8px;">
                <span class="comment-date-clean">${commentDate}</span>${actionButtonsHTML}
              </div>
@@ -282,15 +285,16 @@ async function loadComments() {
       `;
     });
   } else {
-    list.innerHTML += '<p style="color: #444; font-size: 0.8rem; font-style: italic; padding-left: 5px; font-family: \'Arial\', \'Helvetica\', sans-serif !important;">It`s quiet here for now...</p>';
+    fullHTML += '<p style="color: #444; font-size: 0.8rem; font-style: italic; padding-left: 5px; font-family: \'Arial\', \'Helvetica\', sans-serif !important;">It`s quiet here for now...</p>';
   }
+
+  // Единоразовая замена содержимого — физически исключает дублирование
+  list.innerHTML = fullHTML;
 }
 
 window.postComment = async () => {
-  // 1. Захист від паралельних / повторних викликів (double click)
   if (isPostingComment) return;
 
-  // 2. Захист від гостей
   if (!window.myProfile || window.myProfile.isGuest || !currentUserId) {
     if (typeof window.requireAuth === 'function') {
       window.requireAuth(null, "Log in to post comments.");
@@ -300,7 +304,6 @@ window.postComment = async () => {
     return;
   }
 
-  // 3. Перевірка мута
   if (window.myProfile.muted_until && new Date(window.myProfile.muted_until) > new Date()) {
     if (typeof Swal !== 'undefined') {
       Swal.fire({
@@ -330,24 +333,20 @@ window.postComment = async () => {
       submitBtn.style.cursor = 'not-allowed';
     }
 
-    // Очищаємо поле одразу, щоб повторний виклик не прочитав цей же текст
     input.value = '';
 
-    // Відправляємо коментар у Supabase
     const { error: commentErr } = await _supabase.from('forum_comments').insert([
       { topic_id: topicId, content: text, author_name: myName }
     ]);
 
     if (commentErr) {
       console.error('Error inserting comment:', commentErr);
-      // Повертаємо введений текст назад, якщо виникла мережева помилка
       input.value = text;
       return;
     }
 
     await loadComments();
 
-    // Сповіщення адресату [reply:Username]
     const replyMatch = text.match(/\[reply:\s*([^\]]+)\]/i);
     if (replyMatch) {
       const targetUsername = replyMatch[1].trim();
@@ -547,4 +546,3 @@ window.insertReplyTag = function (authorName) {
   textarea.value = `[reply:${authorName.trim()}] ${textarea.value}`;
   textarea.focus();
 };
-
