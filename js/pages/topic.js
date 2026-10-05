@@ -8,12 +8,13 @@ const topicId = urlParams.get('id');
 let myName = "";
 let currentUserId = null;
 let topicData = null;
+let isPostingComment = false;
 
 window.onload = async () => {
   const { data: { user } } = await _supabase.auth.getUser();
 
   if (user) {
-    // 1. АВТОРИЗОВАННЫЙ ПОЛЬЗОВАТЕЛЬ
+    // 1. АВТОРИЗОВАНИЙ КОРИСТУВАЧ
     currentUserId = user.id;
     window.currentUserId = user.id;
 
@@ -34,7 +35,7 @@ window.onload = async () => {
       }
     }
   } else {
-    // 2. ГОСТЕВОЙ РЕЖИМ (не перенаправляем, разрешаем чтение)
+    // 2. ГОСТЬОВИЙ РЕЖИМ (не перенаправляємо, дозволяємо читання)
     currentUserId = null;
     window.currentUserId = null;
     myName = "";
@@ -59,7 +60,7 @@ window.onload = async () => {
 };
 
 /**
- * Блокировка формы комментирования для гостей
+ * Блокування форми коментування для гостей
  */
 function lockCommentFormForGuest() {
   const textarea = document.getElementById('commentText');
@@ -83,7 +84,7 @@ function lockCommentFormForGuest() {
 
 function getOnlineDotHTML(username) {
   const isOnline = (typeof onlineUsers !== 'undefined') && onlineUsers[username];
-  return isOnline ? `<span style="display: inline-block; width: 8px; height: 8px; background-color: #2ecc71; border-radius: 50%; box-shadow: 0 0 6px #2ecc71;"></span>` : '';
+  return isOnline ? `<span style="display: inline-block; width: 7px; height: 7px; background-color: #2ecc71; border-radius: 50%; box-shadow: 0 0 6px #2ecc71; flex-shrink: 0;"></span>` : '';
 }
 
 function formatCommentText(text, currentUserName) {
@@ -134,22 +135,23 @@ async function loadFullTopic() {
   document.getElementById('topicDetail').innerHTML = `
     <div class="main-topic" style="position: relative;">
       <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 15px; border-bottom: 1px solid #222; padding-bottom: 10px;">
-         <span style="display: inline-flex; align-items: center; gap: 2px;">
+         <div style="display: inline-flex; align-items: center; gap: 8px;">
            <span style="font-size: 0.85rem; color: #555; font-family: 'Arial', 'Helvetica', sans-serif !important;">Post author:</span>
-           <span style="display: inline-flex; align-items: center; gap: 6px; margin-left: 5px;">
+           <div style="display: inline-flex; align-items: center; gap: 6px;">
              <img
                src="${displayAvatar}"
                alt="${data.author_name}"
                title="${data.author_name}"
                onclick="window.location.href='profile.html?u=${encodeURIComponent(data.author_name)}'"
-               style="width: 20px; height: 20px; border-radius: 2px; border: 1px solid #333; object-fit: cover; cursor: pointer; flex-shrink: 0;"
+               style="width: 20px; height: 20px; border-radius: 2px; border: 1px solid #333; object-fit: cover; cursor: pointer; flex-shrink: 0; display: block;"
                onerror="this.src='${defaultAvatar}'"
              />
-             <span class="racer-link" onclick="window.location.href='profile.html?u=${encodeURIComponent(data.author_name)}'">
+             <span class="racer-link" style="line-height: 1; display: inline-block; position: relative; top: -1px; cursor: pointer;" onclick="window.location.href='profile.html?u=${encodeURIComponent(data.author_name)}'">
                ${data.author_name}
-             </span>${dotHTML}
-           </span>
-         </span>
+             </span>
+             ${dotHTML}
+           </div>
+         </div>
          <span class="comment-date-clean">${topicDate}</span>
       </div>
       <h1 style="color:var(--nfs-yellow); text-transform: uppercase; font-style: italic; margin-top: 0; font-size: 1.8rem; letter-spacing: 1px;">${data.title}</h1>
@@ -157,6 +159,7 @@ async function loadFullTopic() {
     </div>
   `;
 
+  // Кнопки редагування і видалення топіка доступні тільки його автору
   if (currentUserId && currentUserId === data.author_id) {
     document.getElementById('authorControls')?.classList.remove('hidden');
   } else {
@@ -213,9 +216,11 @@ async function loadComments() {
       // Визначаємо аватарку коментатора
       const commentAvatar = c.author_avatar || c.avatar_url || avatarMap[c.author_name?.toLowerCase()] || defaultAvatar;
 
+      // Перевірка прав: автор коментаря або адміністратор
       const isMine = !window.myProfile?.isGuest && myName && (c.author_name?.toLowerCase() === myName.toLowerCase());
       const canManage = isMine || Boolean(window.myProfile?.is_admin);
 
+      // Блок кнопок керування (карандаш і хрестик)
       const actionButtonsHTML = canManage ? `
         <span style="display: inline-flex; align-items: center; gap: 8px; margin-left: 10px;">
           <span
@@ -240,25 +245,30 @@ async function loadComments() {
       list.innerHTML += `
         <div class="comment" id="comment-${c.id}" style="position: relative;">
           <div class="comment-meta" style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 12px;">
-             <span style="display: inline-flex; align-items: center; height: 1.4rem; gap: 6px;">
+
+             <!-- Лівий блок: аватарка + нікнейм + онлайн-крапка строго на одній лінії -->
+             <div style="display: inline-flex; align-items: center; gap: 6px;">
                <img
                  src="${commentAvatar}"
                  alt="${c.author_name}"
                  title="${c.author_name}"
                  onclick="window.location.href='profile.html?u=${encodeURIComponent(c.author_name)}'"
-                 style="width: 20px; height: 20px; border-radius: 2px; border: 1px solid #333; object-fit: cover; cursor: pointer; flex-shrink: 0;"
+                 style="width: 20px; height: 20px; border-radius: 2px; border: 1px solid #333; object-fit: cover; cursor: pointer; flex-shrink: 0; display: block;"
                  onerror="this.src='${defaultAvatar}'"
                />
-               <span class="racer-link" style="line-height: 1;" onclick="window.location.href='profile.html?u=${encodeURIComponent(c.author_name)}'">
+               <span
+                 class="racer-link"
+                 style="line-height: 1; display: inline-block; position: relative; top: -1px; cursor: pointer;"
+                 onclick="window.location.href='profile.html?u=${encodeURIComponent(c.author_name)}'">
                  ${c.author_name}
                </span>
-               <span style="display: inline-flex; align-items: center; justify-content: center; height: 100%; margin-top: 2px;">
-                 ${dotHTML}
-               </span>
-             </span>
-             <span style="display: inline-flex; align-items: center;">
+               ${dotHTML}
+             </div>
+
+             <!-- Правий блок: дата та кнопки дій -->
+             <div style="display: inline-flex; align-items: center; gap: 8px;">
                <span class="comment-date-clean">${commentDate}</span>${actionButtonsHTML}
-             </span>
+             </div>
           </div>
 
           <div class="user-text-content" id="comment-text-${c.id}" style="white-space: pre-line;">${formatCommentText(c.content, myName)}</div>
@@ -277,7 +287,10 @@ async function loadComments() {
 }
 
 window.postComment = async () => {
-  // Защита от гостей
+  // 1. Захист від паралельних / повторних викликів (double click)
+  if (isPostingComment) return;
+
+  // 2. Захист від гостей
   if (!window.myProfile || window.myProfile.isGuest || !currentUserId) {
     if (typeof window.requireAuth === 'function') {
       window.requireAuth(null, "Log in to post comments.");
@@ -287,7 +300,7 @@ window.postComment = async () => {
     return;
   }
 
-  // Проверка мута
+  // 3. Перевірка мута
   if (window.myProfile.muted_until && new Date(window.myProfile.muted_until) > new Date()) {
     if (typeof Swal !== 'undefined') {
       Swal.fire({
@@ -306,49 +319,75 @@ window.postComment = async () => {
   const text = input ? input.value.trim() : '';
   if (!text) return;
 
-  // 1. Добавляем комментарий
-  const { error: commentErr } = await _supabase.from('forum_comments').insert([
-    { topic_id: topicId, content: text, author_name: myName }
-  ]);
+  const submitBtn = document.querySelector('button[onclick="postComment()"]') ||
+    document.querySelector('.post-comment-btn');
 
-  if (commentErr) {
-    console.error('Error inserting comment:', commentErr);
-    return;
-  }
+  try {
+    isPostingComment = true;
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.style.opacity = '0.5';
+      submitBtn.style.cursor = 'not-allowed';
+    }
 
-  input.value = '';
-  await loadComments();
+    // Очищаємо поле одразу, щоб повторний виклик не прочитав цей же текст
+    input.value = '';
 
-  // 2. Уведомление адресату [reply:Username]
-  const replyMatch = text.match(/\[reply:\s*([^\]]+)\]/i);
-  if (replyMatch) {
-    const targetUsername = replyMatch[1].trim();
+    // Відправляємо коментар у Supabase
+    const { error: commentErr } = await _supabase.from('forum_comments').insert([
+      { topic_id: topicId, content: text, author_name: myName }
+    ]);
 
-    if (targetUsername.toLowerCase() !== myName.toLowerCase()) {
-      const { data: targetUser, error: userErr } = await _supabase
-        .from('profiles')
-        .select('id, username')
-        .ilike('username', targetUsername)
-        .maybeSingle();
+    if (commentErr) {
+      console.error('Error inserting comment:', commentErr);
+      // Повертаємо введений текст назад, якщо виникла мережева помилка
+      input.value = text;
+      return;
+    }
 
-      if (userErr) {
-        console.error('Error fetching target profile:', userErr);
-      }
+    await loadComments();
 
-      if (targetUser && targetUser.id !== currentUserId) {
-        const { error: notifErr } = await _supabase.from('notifications').insert([{
-          sender_id: currentUserId,
-          sender_name: myName,
-          receiver_id: targetUser.id,
-          type: 'forum_reply',
-          topic_id: topicId,
-          status: 'pending'
-        }]);
+    // Сповіщення адресату [reply:Username]
+    const replyMatch = text.match(/\[reply:\s*([^\]]+)\]/i);
+    if (replyMatch) {
+      const targetUsername = replyMatch[1].trim();
 
-        if (notifErr) {
-          console.error('Notification error (reply):', notifErr);
+      if (targetUsername.toLowerCase() !== myName.toLowerCase()) {
+        const { data: targetUser, error: userErr } = await _supabase
+          .from('profiles')
+          .select('id, username')
+          .ilike('username', targetUsername)
+          .maybeSingle();
+
+        if (userErr) {
+          console.error('Error fetching target profile:', userErr);
+        }
+
+        if (targetUser && targetUser.id !== currentUserId) {
+          const { error: notifErr } = await _supabase.from('notifications').insert([{
+            sender_id: currentUserId,
+            sender_name: myName,
+            receiver_id: targetUser.id,
+            type: 'forum_reply',
+            topic_id: topicId,
+            status: 'pending'
+          }]);
+
+          if (notifErr) {
+            console.error('Notification error (reply):', notifErr);
+          }
         }
       }
+    }
+  } catch (err) {
+    console.error('Failed to post comment:', err);
+    input.value = text;
+  } finally {
+    isPostingComment = false;
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.style.opacity = '1';
+      submitBtn.style.cursor = 'pointer';
     }
   }
 };
@@ -356,7 +395,6 @@ window.postComment = async () => {
 window.editComment = async (commentId) => {
   if (!window.myProfile || window.myProfile.isGuest || !currentUserId) return;
 
-  // Получаем текущий текст комментария из Supabase
   const { data: comment, error } = await _supabase
     .from('forum_comments')
     .select('content')
