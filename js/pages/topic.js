@@ -108,6 +108,19 @@ async function loadFullTopic() {
   }
   topicData = data;
 
+  // Отримуємо аватар автора топіка (з запису топіка або з таблиці profiles)
+  let authorAvatar = data.author_avatar || data.avatar_url || null;
+  if (!authorAvatar && data.author_name) {
+    const { data: prof } = await _supabase
+      .from('profiles')
+      .select('avatar_url')
+      .ilike('username', data.author_name)
+      .maybeSingle();
+    if (prof?.avatar_url) authorAvatar = prof.avatar_url;
+  }
+  const defaultAvatar = 'https://via.placeholder.com/20?text=R';
+  const displayAvatar = authorAvatar || defaultAvatar;
+
   const dotHTML = getOnlineDotHTML(data.author_name);
   const dateObj = new Date(data.created_at);
   const topicDate = dateObj.toLocaleString('en-US', {
@@ -124,6 +137,14 @@ async function loadFullTopic() {
          <span style="display: inline-flex; align-items: center; gap: 2px;">
            <span style="font-size: 0.85rem; color: #555; font-family: 'Arial', 'Helvetica', sans-serif !important;">Post author:</span>
            <span style="display: inline-flex; align-items: center; gap: 6px; margin-left: 5px;">
+             <img
+               src="${displayAvatar}"
+               alt="${data.author_name}"
+               title="${data.author_name}"
+               onclick="window.location.href='profile.html?u=${encodeURIComponent(data.author_name)}'"
+               style="width: 20px; height: 20px; border-radius: 2px; border: 1px solid #333; object-fit: cover; cursor: pointer; flex-shrink: 0;"
+               onerror="this.src='${defaultAvatar}'"
+             />
              <span class="racer-link" onclick="window.location.href='profile.html?u=${encodeURIComponent(data.author_name)}'">
                ${data.author_name}
              </span>${dotHTML}
@@ -136,7 +157,6 @@ async function loadFullTopic() {
     </div>
   `;
 
-  // Кнопки редактирования и удаления топика доступны только его автору
   if (currentUserId && currentUserId === data.author_id) {
     document.getElementById('authorControls')?.classList.remove('hidden');
   } else {
@@ -156,6 +176,28 @@ async function loadComments() {
   if (!list) return;
   list.innerHTML = '<h3 style="border-bottom: 1px solid #222; padding-bottom: 10px; font-style: italic; font-size: 1.1rem; letter-spacing: 1px;">COMMENTS:</h3>';
 
+  const defaultAvatar = 'https://via.placeholder.com/20?text=R';
+
+  // Отримуємо аватарки всіх авторів коментарів одним запитом без зайвих дублів
+  const avatarMap = {};
+  if (data && data.length > 0) {
+    const authorNames = [...new Set(data.map(c => c.author_name).filter(Boolean))];
+    if (authorNames.length > 0) {
+      const { data: profs } = await _supabase
+        .from('profiles')
+        .select('username, avatar_url')
+        .in('username', authorNames);
+
+      if (profs) {
+        profs.forEach(p => {
+          if (p.username) {
+            avatarMap[p.username.toLowerCase()] = p.avatar_url;
+          }
+        });
+      }
+    }
+  }
+
   if (data && data.length > 0) {
     data.forEach(c => {
       const dateObj = new Date(c.created_at);
@@ -168,11 +210,12 @@ async function loadComments() {
       });
       const dotHTML = getOnlineDotHTML(c.author_name);
 
-      // Проверка прав: автор комментария или администратор
+      // Визначаємо аватарку коментатора
+      const commentAvatar = c.author_avatar || c.avatar_url || avatarMap[c.author_name?.toLowerCase()] || defaultAvatar;
+
       const isMine = !window.myProfile?.isGuest && myName && (c.author_name?.toLowerCase() === myName.toLowerCase());
       const canManage = isMine || Boolean(window.myProfile?.is_admin);
 
-      // Блок кнопок управления (карандаш и крестик в стиле чата)
       const actionButtonsHTML = canManage ? `
         <span style="display: inline-flex; align-items: center; gap: 8px; margin-left: 10px;">
           <span
@@ -198,6 +241,14 @@ async function loadComments() {
         <div class="comment" id="comment-${c.id}" style="position: relative;">
           <div class="comment-meta" style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 12px;">
              <span style="display: inline-flex; align-items: center; height: 1.4rem; gap: 6px;">
+               <img
+                 src="${commentAvatar}"
+                 alt="${c.author_name}"
+                 title="${c.author_name}"
+                 onclick="window.location.href='profile.html?u=${encodeURIComponent(c.author_name)}'"
+                 style="width: 20px; height: 20px; border-radius: 2px; border: 1px solid #333; object-fit: cover; cursor: pointer; flex-shrink: 0;"
+                 onerror="this.src='${defaultAvatar}'"
+               />
                <span class="racer-link" style="line-height: 1;" onclick="window.location.href='profile.html?u=${encodeURIComponent(c.author_name)}'">
                  ${c.author_name}
                </span>
