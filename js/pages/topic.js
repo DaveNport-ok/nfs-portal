@@ -547,3 +547,4 @@ window.insertReplyTag = function (authorName) {
   textarea.value = `[reply:${authorName.trim()}] ${textarea.value}`;
   textarea.focus();
 };
+
