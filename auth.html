@@ -15,7 +15,6 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-
 </head>
 <body class="auth-page">
 
@@ -24,21 +23,54 @@
 <div class="bg-game-title">NEED FOR SPEED</div>
 
 <div class="auth-box">
-  <div id="errorMsg" class="error"></div>
+  <!-- Заголовок формы для функции toggleForm() -->
+  <h2 id="formTitle" style="color: var(--nfs-yellow, #f1c40f); margin-top: 0; text-transform: uppercase; font-style: italic; letter-spacing: 1px;">
+    Enter the game
+  </h2>
+
+  <div id="errorMsg" class="error" style="display: none;"></div>
 
   <div id="authFields">
-    <input type="email" id="email" placeholder="E-mail">
-    <input type="text" id="username" placeholder="Your nickname" style="display: none;">
-    <input type="password" id="password" placeholder="Password">
+    <input
+      type="email"
+      id="email"
+      placeholder="E-mail"
+      autocomplete="email"
+    >
+    <input
+      type="text"
+      id="username"
+      placeholder="Your nickname"
+      autocomplete="username"
+      style="display: none;"
+    >
+    <input
+      type="password"
+      id="password"
+      minlength="8"
+      maxlength="12"
+      placeholder="Password (8-12 chars)"
+      autocomplete="current-password"
+    >
   </div>
 
   <button class="btn btn-primary" id="mainBtn" onclick="handleAuth()">
     Log in
   </button>
 
-  <div class="toggle-container">
+  <div class="toggle-container" style="display: flex; flex-direction: column; gap: 8px; margin-top: 15px;">
     <button class="btn btn-secondary" id="toggleBtn" onclick="toggleForm()">
       No account? Sign up!
+    </button>
+
+    <!-- Кнопка входа гостем для continueAsGuest() -->
+    <button
+      type="button"
+      class="btn"
+      style="background: transparent; border: 1px solid #333; color: #888; cursor: pointer; font-size: 0.8rem; padding: 6px; text-transform: uppercase;"
+      onclick="continueAsGuest()"
+    >
+      Drive as Guest »
     </button>
   </div>
 </div>
