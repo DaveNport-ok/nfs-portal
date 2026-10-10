@@ -2,6 +2,8 @@
 
 // Глобальный объект для хранения пользователей онлайн
 window.onlineUsers = {};
+// Таймер для предотвращения скачков счетчика "0 -> 1"
+let globalOnlineDebounceTimer = null;
 
 /**
  * Проверка, является ли текущий пользователь гостем
@@ -49,7 +51,7 @@ window.requireAuth = function(actionCallback, message = "This action is availabl
 };
 
 /**
- * Блокировка полей ввода для гостей на страницах (форум, чаты и комментарии)
+ * Блокировка полей ввода для гостей на страницах
  */
 window.applyGuestRestrictions = function() {
   if (!window.isGuestUser()) return;
@@ -118,7 +120,7 @@ function updateFooterUserBadge(profile) {
 }
 
 /**
- * Инициализация онлайн-статуса и глобальных каналов
+ * Инициализация онлайн-статуса и глобальных каналов (С ОПТИМИЗАЦИЕЙ СКАЧКОВ)
  */
 window.initGlobalStatus = async function(supabaseClient, profile) {
   if (!supabaseClient) return;
@@ -142,6 +144,18 @@ window.initGlobalStatus = async function(supabaseClient, profile) {
   updateFooterUserBadge(window.myProfile);
 
   const currentPage = window.location.pathname.split("/").pop() || 'index.html';
+  const footerOnline = document.getElementById('footerOnline');
+
+  // 1. Мгновенное отображение кэшированного онлайна (чтобы не было мигания 0 -> 1)
+  const cachedGlobalOnline = sessionStorage.getItem('last_global_online_count');
+  if (footerOnline && cachedGlobalOnline !== null) {
+    footerOnline.innerText = cachedGlobalOnline;
+  }
+
+  // Удаляем старый канал перед созданием нового (при SPA переходах)
+  if (window.globalStatusChannel) {
+    supabaseClient.removeChannel(window.globalStatusChannel);
+  }
 
   const statusChannel = supabaseClient.channel('global-online', {
     config: {
@@ -151,11 +165,30 @@ window.initGlobalStatus = async function(supabaseClient, profile) {
     }
   });
 
+  window.globalStatusChannel = statusChannel;
+
+  // Обработка синхронизации Presence
   statusChannel.on('presence', { event: 'sync' }, () => {
     window.onlineUsers = statusChannel.presenceState();
+    const currentCount = Object.keys(window.onlineUsers).length;
 
-    const footerOnline = document.getElementById('footerOnline');
-    if (footerOnline) footerOnline.innerText = Object.keys(window.onlineUsers).length;
+    sessionStorage.setItem('last_global_online_count', currentCount);
+
+    if (footerOnline) {
+      // Защита от просадки до нуля при переходе между страницами
+      if (currentCount === 0) {
+        if (globalOnlineDebounceTimer) clearTimeout(globalOnlineDebounceTimer);
+        globalOnlineDebounceTimer = setTimeout(() => {
+          footerOnline.innerText = '0';
+        }, 1500); // Ждем 1.5 сек перед тем как показать "0"
+      } else {
+        if (globalOnlineDebounceTimer) {
+          clearTimeout(globalOnlineDebounceTimer);
+          globalOnlineDebounceTimer = null;
+        }
+        footerOnline.innerText = currentCount;
+      }
+    }
 
     if (typeof window.updateFriendsStatusOnly === 'function') window.updateFriendsStatusOnly();
     if (typeof window.updateLiveStatusUI === 'function') window.updateLiveStatusUI();
@@ -179,7 +212,7 @@ window.initGlobalStatus = async function(supabaseClient, profile) {
     });
   };
 
-  // Виджет друзей Steam (инжектируется и гостям, но показывает окно авторизации)
+  // Виджет друзей Steam
   const isChatPage = window.location.pathname.includes('chats.html');
   const isTopicPage = window.location.pathname.includes('topic.html');
 
@@ -203,6 +236,7 @@ window.initGlobalStatus = async function(supabaseClient, profile) {
         await window.trackMyStatus(savedStatus);
 
         const now = new Date().toISOString();
+        // Дублируем статус в БД
         await supabaseClient
           .from('profiles')
           .update({ status: savedStatus, last_seen: now })

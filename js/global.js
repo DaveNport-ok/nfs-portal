@@ -4,25 +4,41 @@ import { _supabase } from './config.js';
 window.currentActiveTicketId = null;
 
 /**
- * Розрахунок відносного часу створення сповіщення
+ * Вспомогательная функция для стандартизации сообщений SweetAlert2
+ */
+function showAlert(title, text, icon = 'info', extraConfig = {}) {
+  if (typeof Swal === 'undefined') {
+    alert(`${title}: ${text}`);
+    return Promise.resolve();
+  }
+  return Swal.fire({
+    title,
+    text,
+    icon,
+    background: '#111',
+    color: '#fff',
+    confirmButtonColor: '#f1c40f',
+    ...extraConfig
+  });
+}
+
+/**
+ * Оптимизированный расчет относительного времени
  */
 function getRelativeTime(dateString) {
   if (!dateString) return '';
-  const date = new Date(dateString);
-  const now = new Date();
-  const seconds = Math.floor((now - date) / 1000);
+  const seconds = Math.floor((Date.now() - new Date(dateString).getTime()) / 1000);
 
   if (seconds < 60) return 'just now';
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return `${minutes}m ago`;
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
+  return `${Math.floor(hours / 24)}d ago`;
 }
 
 /**
- * Оновлення лічильника непрочитаних повідомлень
+ * Обновление счетчика непрочитанных сообщений
  */
 window.updateGlobalMsgBadge = async function(supabaseClient, myId) {
   const client = supabaseClient || _supabase;
@@ -30,7 +46,7 @@ window.updateGlobalMsgBadge = async function(supabaseClient, myId) {
 
   const { count, error } = await client
     .from('direct_messages')
-    .select('*', { count: 'exact', head: true })
+    .select('id', { count: 'exact', head: true })
     .eq('receiver_id', myId)
     .eq('is_read', false);
 
@@ -46,11 +62,15 @@ window.updateGlobalMsgBadge = async function(supabaseClient, myId) {
 };
 
 /**
- * Вихід з акаунту
+ * Выход из аккаунта с очисткой локального кэша
  */
 window.handleLogout = async function() {
   const user = window.myProfile || window.currentUserId;
   const userId = typeof user === 'object' ? user?.id : user;
+
+  sessionStorage.removeItem('myProfile');
+  sessionStorage.removeItem('last_global_online_count'); // Очищаем кэш онлайна
+  localStorage.removeItem('driver_status');
 
   if (userId && typeof _supabase !== 'undefined' && !user?.isGuest) {
     await _supabase.from('profiles').update({ status: 'OFFLINE' }).eq('id', userId);
@@ -58,12 +78,11 @@ window.handleLogout = async function() {
   if (typeof _supabase !== 'undefined') {
     await _supabase.auth.signOut();
   }
-  localStorage.removeItem('driver_status');
   window.location.href = 'auth.html';
 };
 
 /**
- * Перемикання списку сповіщень
+ * Переключение видимости уведомлений
  */
 window.toggleNotifyPopup = function() {
   const p = document.getElementById('notifyPopup');
@@ -79,82 +98,67 @@ window.toggleNotifyPopup = function() {
           <a href="auth.html" style="color:#f1c40f; text-decoration:none; font-weight:bold; display:inline-block; margin-top:8px;">LOG IN</a>
         </div>`;
     }
-    p.style.display = p.style.display === 'block' ? 'none' : 'block';
-    return;
   }
-
   p.style.display = p.style.display === 'block' ? 'none' : 'block';
 };
 
 /**
- * Оновлення сповіщень (заявки в друзі + відповіді на форумі)
+ * Обновление списка уведомлений (Без перерисовок DOM в цикле)
  */
 window.updateFriendNotifications = async function() {
-  if (typeof _supabase === 'undefined') return;
+  if (typeof _supabase === 'undefined' || window.myProfile?.isGuest) return;
 
-  if (window.myProfile?.isGuest) return;
-
-  let currentId = window.myProfile?.id || window.currentUserId;
-  if (!currentId) {
-    const { data: { user } } = await _supabase.auth.getUser();
-    if (user) {
-      currentId = user.id;
-      window.currentUserId = user.id;
-    }
-  }
-
+  const currentId = window.myProfile?.id || window.currentUserId;
   if (!currentId) return;
-
-  const { data: notifications, error } = await _supabase
-    .from('notifications')
-    .select('*')
-    .eq('receiver_id', currentId)
-    .eq('status', 'pending')
-    .order('created_at', { ascending: false });
 
   const countEl = document.getElementById('notifyCount');
   const listEl = document.getElementById('notifyList');
   if (!countEl || !listEl) return;
+
+  const { data: notifications, error } = await _supabase
+    .from('notifications')
+    .select('id, created_at, type, sender_name, topic_id')
+    .eq('receiver_id', currentId)
+    .eq('status', 'pending')
+    .order('created_at', { ascending: false });
 
   const currentLang = localStorage.getItem('safehouse_lang') || 'en';
 
   if (!error && notifications && notifications.length > 0) {
     countEl.innerText = notifications.length;
     countEl.style.display = 'flex';
-    listEl.innerHTML = '';
 
-    notifications.forEach(item => {
+    const textWants = (typeof translations !== 'undefined' && translations[currentLang]?.['wants_friends'])
+      ? translations[currentLang]['wants_friends']
+      : 'wants to be friends';
+
+    listEl.innerHTML = notifications.map(item => {
       const timeAgoStr = getRelativeTime(item.created_at);
 
       if (item.type === 'forum_reply') {
-        listEl.innerHTML += `
-          <div class="notify-item" onclick="handleForumNotificationClick('${item.id}', '${item.topic_id}')" style="padding:10px; border-bottom:1px solid #222; color:#fff; font-size:0.8rem; cursor:pointer; background:#141414; transition:background 0.2s;" onmouseover="this.style.background='#1f1f1f'" onmouseout="this.style.background='#141414'">
+        return `
+          <div class="notify-item" onclick="handleForumNotificationClick('${item.id}', '${item.topic_id}')" style="padding:10px; border-bottom:1px solid #222; color:#fff; font-size:0.8rem; cursor:pointer; background:#141414; transition:background 0.2s;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
               <span style="color:#f1c40f; font-weight:bold;">@${item.sender_name}</span>
               <span style="font-size:9px; color:#777;">${timeAgoStr}</span>
             </div>
-            <div style="color:#ccc; font-size:11px;">
-              replied to you in topic
-            </div>
-          </div>`;
-      } else {
-        const textWants = (typeof translations !== 'undefined' && translations[currentLang]?.['wants_friends'])
-          ? translations[currentLang]['wants_friends']
-          : 'wants to be friends';
-
-        listEl.innerHTML += `
-          <div class="notify-item" style="padding:10px; border-bottom:1px solid #222; color:#fff; font-size:0.8rem;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-              <span><b>${item.sender_name}</b> ${textWants}</span>
-              <span style="font-size:9px; color:#777;">${timeAgoStr}</span>
-            </div>
-            <div class="notify-btns" style="display:flex; gap:5px; margin-top:5px;">
-              <button class="btn-acc" onclick="respondFriend('${item.id}', 'accepted')" style="flex:1; background:#f1c40f; border:none; cursor:pointer; font-weight:bold; font-size:10px; padding:4px;">OK</button>
-              <button class="btn-rej" onclick="respondFriend('${item.id}', 'rejected')" style="flex:1; background:#333; color:#fff; border:none; cursor:pointer; font-size:10px; padding:4px;">NO</button>
-            </div>
+            <div style="color:#ccc; font-size:11px;">replied to you in topic</div>
           </div>`;
       }
-    });
+
+      return `
+        <div class="notify-item" style="padding:10px; border-bottom:1px solid #222; color:#fff; font-size:0.8rem;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+            <span><b>${item.sender_name}</b> ${textWants}</span>
+            <span style="font-size:9px; color:#777;">${timeAgoStr}</span>
+          </div>
+          <div class="notify-btns" style="display:flex; gap:5px; margin-top:5px;">
+            <button class="btn-acc" onclick="respondFriend('${item.id}', 'accepted')" style="flex:1; background:#f1c40f; border:none; cursor:pointer; font-weight:bold; font-size:10px; padding:4px;">OK</button>
+            <button class="btn-rej" onclick="respondFriend('${item.id}', 'rejected')" style="flex:1; background:#333; color:#fff; border:none; cursor:pointer; font-size:10px; padding:4px;">NO</button>
+          </div>
+        </div>`;
+    }).join('');
+
   } else {
     countEl.style.display = 'none';
     const textNoReq = (typeof translations !== 'undefined' && translations[currentLang]?.['no_requests'])
@@ -165,7 +169,7 @@ window.updateFriendNotifications = async function() {
 };
 
 /**
- * Перехід за сповіщенням форуму
+ * Переход по уведомлению форума
  */
 window.handleForumNotificationClick = async function(notificationId, topicId) {
   if (typeof _supabase !== 'undefined' && notificationId) {
@@ -179,7 +183,7 @@ window.handleForumNotificationClick = async function(notificationId, topicId) {
 };
 
 /**
- * Відповідь на заявку в друзі
+ * Ответ на заявку в друзья
  */
 window.respondFriend = async function(reqId, status) {
   if (typeof _supabase === 'undefined') return;
@@ -191,12 +195,12 @@ window.respondFriend = async function(reqId, status) {
     }
     await window.updateFriendNotifications();
   } catch (err) {
-    console.error(err);
+    console.error('Error responding to friend req:', err);
   }
 };
 
 /**
- * Підключення Realtime для сповіщень
+ * Подключение Realtime для уведомлений
  */
 function setupNotificationsRealtime(userId) {
   if (!userId || typeof _supabase === 'undefined') return;
@@ -215,37 +219,22 @@ function setupNotificationsRealtime(userId) {
 }
 
 /**
- * Логіка роботи модалки підтримки
+ * Поддержка / Тикеты
  */
 window.openSupportModal = async function() {
   const profile = window.myProfile;
 
-  // Заборона гостям створювати тікети
   if (!profile || profile.isGuest) {
-    if (typeof Swal !== 'undefined') {
-      Swal.fire({
-        title: 'ACCESS DENIED',
-        text: 'Support tickets are available for authorized drivers only.',
-        icon: 'info',
-        background: '#0a0a0a',
-        color: '#fff',
-        showCancelButton: true,
-        confirmButtonText: 'LOG IN',
-        cancelButtonText: 'CANCEL',
-        confirmButtonColor: '#f1c40f',
-        cancelButtonColor: '#333'
-      }).then((result) => {
-        if (result.isConfirmed) {
-          if (typeof window.openModal === 'function') {
-            window.openModal();
-          } else {
-            window.location.href = 'auth.html';
-          }
-        }
-      });
-    } else {
-      alert('Please log in to contact support.');
-    }
+    showAlert('ACCESS DENIED', 'Support tickets are available for authorized drivers only.', 'info', {
+      showCancelButton: true,
+      confirmButtonText: 'LOG IN',
+      cancelButtonText: 'CANCEL',
+      cancelButtonColor: '#333'
+    }).then((result) => {
+      if (result.isConfirmed) {
+        typeof window.openModal === 'function' ? window.openModal() : (window.location.href = 'auth.html');
+      }
+    });
     return;
   }
 
@@ -276,29 +265,15 @@ window.closeSupportModal = function() {
 window.submitSupportTicket = async function() {
   const profile = window.myProfile;
   if (!profile || profile.isGuest) {
-    Swal.fire({
-      title: 'ERROR',
-      text: 'You must be logged in to contact support.',
-      icon: 'error',
-      background: '#111',
-      color: '#fff',
-      confirmButtonColor: '#f1c40f'
-    });
+    showAlert('ERROR', 'You must be logged in to contact support.', 'error');
     return;
   }
 
   const descriptionEl = document.getElementById('supportDescription');
-  const description = descriptionEl ? descriptionEl.value.trim() : '';
+  const description = descriptionEl?.value.trim() || '';
 
   if (!description) {
-    Swal.fire({
-      title: 'WARNING',
-      text: 'Please enter your message.',
-      icon: 'warning',
-      background: '#111',
-      color: '#fff',
-      confirmButtonColor: '#f1c40f'
-    });
+    showAlert('WARNING', 'Please enter your message.', 'warning');
     return;
   }
 
@@ -317,40 +292,19 @@ window.submitSupportTicket = async function() {
       .eq('id', window.currentActiveTicketId);
 
     if (error) {
-      Swal.fire({
-        title: 'ERROR',
-        text: 'Failed to send reply.',
-        icon: 'error',
-        background: '#111',
-        color: '#fff',
-        confirmButtonColor: '#f1c40f'
-      });
+      showAlert('ERROR', 'Failed to send reply.', 'error');
     } else {
       if (descriptionEl) descriptionEl.value = '';
       window.closeSupportModal();
-      Swal.fire({
-        title: 'SUCCESS',
-        text: 'Your reply has been sent to support!',
-        icon: 'success',
-        background: '#111',
-        color: '#fff',
-        confirmButtonColor: '#f1c40f'
-      });
+      showAlert('SUCCESS', 'Your reply has been sent to support!', 'success');
       window.checkAdminReplies();
     }
   } else {
     const subjectEl = document.getElementById('supportSubject');
-    const subject = subjectEl ? subjectEl.value.trim() : '';
+    const subject = subjectEl?.value.trim() || '';
 
     if (!subject) {
-      Swal.fire({
-        title: 'WARNING',
-        text: 'Please enter a subject.',
-        icon: 'warning',
-        background: '#111',
-        color: '#fff',
-        confirmButtonColor: '#f1c40f'
-      });
+      showAlert('WARNING', 'Please enter a subject.', 'warning');
       return;
     }
 
@@ -362,26 +316,12 @@ window.submitSupportTicket = async function() {
     }]);
 
     if (error) {
-      Swal.fire({
-        title: 'ERROR',
-        text: 'Failed to send ticket.',
-        icon: 'error',
-        background: '#111',
-        color: '#fff',
-        confirmButtonColor: '#f1c40f'
-      });
+      showAlert('ERROR', 'Failed to send ticket.', 'error');
     } else {
       if (subjectEl) subjectEl.value = '';
       if (descriptionEl) descriptionEl.value = '';
       window.closeSupportModal();
-      Swal.fire({
-        title: 'SUCCESS',
-        text: 'Your ticket has been sent to the support!',
-        icon: 'success',
-        background: '#111',
-        color: '#fff',
-        confirmButtonColor: '#f1c40f'
-      });
+      showAlert('SUCCESS', 'Your ticket has been sent to the support!', 'success');
       window.checkAdminReplies();
     }
   }
@@ -396,23 +336,9 @@ window.closeAndArchieveTicket = async function() {
     .eq('id', window.currentActiveTicketId);
 
   if (error) {
-    Swal.fire({
-      title: 'ERROR',
-      text: 'Failed to close ticket.',
-      icon: 'error',
-      background: '#111',
-      color: '#fff',
-      confirmButtonColor: '#f1c40f'
-    });
+    showAlert('ERROR', 'Failed to close ticket.', 'error');
   } else {
-    Swal.fire({
-      title: 'CLOSED',
-      text: 'Ticket closed! Now you can create a new one.',
-      icon: 'success',
-      background: '#111',
-      color: '#fff',
-      confirmButtonColor: '#f1c40f'
-    });
+    showAlert('CLOSED', 'Ticket closed! Now you can create a new one.', 'success');
     const subEl = document.getElementById('supportSubject');
     const descEl = document.getElementById('supportDescription');
     if (subEl) subEl.value = '';
@@ -427,7 +353,7 @@ window.checkAdminReplies = async function() {
 
   const { data: tickets } = await _supabase
     .from('support_tickets')
-    .select('*')
+    .select('id, subject, description, admin_reply, status, is_read')
     .eq('user_id', profile.id)
     .neq('status', 'closed')
     .order('created_at', { ascending: false });
@@ -438,10 +364,10 @@ window.checkAdminReplies = async function() {
     const latestTicket = tickets[0];
     window.currentActiveTicketId = latestTicket.id;
 
-    if (latestTicket.status === 'resolved' && !latestTicket.is_read) {
-      if (badge) badge.innerHTML = ' <span style="color: #ff4444; font-weight: 900;">(1)</span>';
-    } else {
-      if (badge) badge.innerText = '';
+    if (badge) {
+      badge.innerHTML = (latestTicket.status === 'resolved' && !latestTicket.is_read)
+        ? ' <span style="color: #ff4444; font-weight: 900;">(1)</span>'
+        : '';
     }
 
     const subEl = document.getElementById('supportUserSubject');
@@ -460,18 +386,13 @@ window.checkAdminReplies = async function() {
     const adminLabel = document.getElementById('adminResponseLabel');
     const closeSection = document.getElementById('closeTicketSection');
 
-    if (latestTicket.admin_reply) {
-      if (replyText) {
-        replyText.innerText = latestTicket.admin_reply;
-        replyText.style.display = 'block';
-      }
-      if (adminLabel) adminLabel.style.display = 'block';
-      if (closeSection) closeSection.style.display = 'block';
-    } else {
-      if (adminLabel) adminLabel.style.display = 'none';
-      if (replyText) replyText.style.display = 'none';
-      if (closeSection) closeSection.style.display = 'none';
+    const hasReply = !!latestTicket.admin_reply;
+    if (replyText) {
+      replyText.innerText = latestTicket.admin_reply || '';
+      replyText.style.display = hasReply ? 'block' : 'none';
     }
+    if (adminLabel) adminLabel.style.display = hasReply ? 'block' : 'none';
+    if (closeSection) closeSection.style.display = hasReply ? 'block' : 'none';
 
     const replyContainer = document.getElementById('supportReplyContainer');
     if (replyContainer) replyContainer.style.display = 'block';
@@ -492,7 +413,7 @@ window.checkAdminReplies = async function() {
 };
 
 /**
- * Логіка щоденного бонусу
+ * Ежедневный бонус
  */
 window.checkDailyBonus = async function(me) {
   if (!me || me.isGuest || typeof _supabase === 'undefined') return;
@@ -519,22 +440,19 @@ window.checkDailyBonus = async function(me) {
       me.level = newLevel;
       me.last_active_date = today;
 
-      if (typeof Swal !== 'undefined') {
-        Swal.fire({
-          title: 'DAILY BONUS!',
-          text: `+${bonus} RATING FOR DAILY ENTRY!`,
-          icon: 'success',
-          timer: 3000,
-          showConfirmButton: false,
-          customClass: { popup: 'nfs-crt-modal' }
-        });
-      }
+      sessionStorage.setItem('myProfile', JSON.stringify(me));
+
+      showAlert('DAILY BONUS!', `+${bonus} RATING FOR DAILY ENTRY!`, 'success', {
+        timer: 3000,
+        showConfirmButton: false,
+        customClass: { popup: 'nfs-crt-modal' }
+      });
     }
   }
 };
 
 /**
- * Вікно авторизації
+ * Окно авторизации
  */
 window.openModal = async function() {
   if (typeof _supabase === 'undefined' || typeof Swal === 'undefined') return;
@@ -548,23 +466,19 @@ window.openModal = async function() {
         <input id="swal-password" class="swal2-input" placeholder="Password" type="password" style="background:#111; color:#fff;">
       `,
     focusConfirm: false,
-    preConfirm: () => {
-      return {
-        email: document.getElementById('swal-email').value.trim(),
-        password: document.getElementById('swal-password').value.trim()
-      };
-    }
+    preConfirm: () => ({
+      email: document.getElementById('swal-email')?.value.trim(),
+      password: document.getElementById('swal-password')?.value.trim()
+    })
   });
 
-  if (formValues) {
-    const { error } = await _supabase.auth.signInWithPassword({
-      email: formValues.email,
-      password: formValues.password,
-    });
+  if (formValues?.email && formValues?.password) {
+    const { error } = await _supabase.auth.signInWithPassword(formValues);
 
     if (error) {
-      Swal.fire({ icon: 'error', title: 'ERROR', text: error.message, background: '#0a0a0a', color: '#fff' });
+      showAlert('ERROR', error.message, 'error');
     } else {
+      sessionStorage.removeItem('myProfile');
       Swal.close();
       location.reload();
     }
@@ -572,16 +486,39 @@ window.openModal = async function() {
 };
 
 /**
- * Автоматичний запуск на кожній сторінці
+ * Оптимизированный старт страницы (Оптимистичный UI + Параллельные сетевые запросы)
  */
 document.addEventListener('DOMContentLoaded', async () => {
   if (typeof _supabase === 'undefined') return;
 
   try {
+    // 1. МГНОВЕННО проверяем кэш sessionStorage
+    const cachedProfileRaw = sessionStorage.getItem('myProfile');
+    let hasValidCache = false;
+
+    if (cachedProfileRaw) {
+      try {
+        const cachedProfile = JSON.parse(cachedProfileRaw);
+        if (cachedProfile?.id) {
+          window.myProfile = cachedProfile;
+          window.currentUserId = cachedProfile.id;
+          hasValidCache = true;
+
+          // Если функция инициализации статуса есть (в widgets.js), запускаем её мгновенно
+          if (typeof window.initGlobalStatus === 'function') {
+            window.initGlobalStatus(_supabase, cachedProfile);
+          }
+        }
+      } catch (e) {
+        sessionStorage.removeItem('myProfile');
+      }
+    }
+
+    // 2. Получаем активную сессию
     const { data: { session } } = await _supabase.auth.getSession();
 
-    // 1. РЕЖИМ ГОСТЯ (немає активної сесії)
     if (!session?.user) {
+      sessionStorage.removeItem('myProfile');
       window.myProfile = {
         id: null,
         username: 'Guest_' + Math.random().toString(36).substring(2, 6),
@@ -592,12 +529,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       window.currentUserId = null;
 
       if (typeof window.initGlobalStatus === 'function') {
-        await window.initGlobalStatus(_supabase, null);
+        window.initGlobalStatus(_supabase, null);
       }
       return;
     }
 
-    // 2. АВТОРИЗОВАНИЙ КОРИСТУВАЧ
+    // 3. Запрашиваем актуальный профиль из Supabase
     const { data: profile } = await _supabase
       .from('profiles')
       .select('*')
@@ -609,16 +546,21 @@ document.addEventListener('DOMContentLoaded', async () => {
       window.myProfile = profile;
       window.currentUserId = profile.id;
 
-      if (typeof window.initGlobalStatus === 'function') {
-        await window.initGlobalStatus(_supabase, profile);
+      sessionStorage.setItem('myProfile', JSON.stringify(profile));
+
+      // Если кэша не было (первый заход) — инициализируем статус
+      if (!hasValidCache && typeof window.initGlobalStatus === 'function') {
+        window.initGlobalStatus(_supabase, profile);
       }
 
-      await window.checkDailyBonus(profile);
-      await window.updateGlobalMsgBadge(_supabase, profile.id);
-      await window.updateFriendNotifications();
-      await window.checkAdminReplies();
+      // 4. Безопасный и параллельный запуск всех фоновых задач
+      Promise.allSettled([
+        window.checkDailyBonus(profile),
+        window.updateGlobalMsgBadge(_supabase, profile.id),
+        window.updateFriendNotifications(),
+        window.checkAdminReplies()
+      ]);
 
-      // Слухач Realtime сповіщень
       setupNotificationsRealtime(profile.id);
     }
   } catch (err) {
