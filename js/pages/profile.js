@@ -119,7 +119,6 @@ function renderGuestSelfProfile() {
     nameEl.classList.remove('admin-glow', 'vip-glow');
   }
 
-  // Значок гостя не отображаем
   if (badgeEl) {
     badgeEl.innerHTML = '';
   }
@@ -145,7 +144,6 @@ function renderGuestSelfProfile() {
     statusEl.className = 'status-badge status-offline';
   }
 
-  // Скрываем все кнопки действий
   const editBtn = document.getElementById('editBtn');
   const statusSelect = document.getElementById('statusSelect');
   const addCarBtn = document.getElementById('addCarBtn');
@@ -160,7 +158,6 @@ function renderGuestSelfProfile() {
   if (friendBtn) friendBtn.classList.add('hidden');
   if (adminMuteBtn) adminMuteBtn.classList.add('hidden');
 
-  // Контрастный и читаемый блок закрытого гаража
   const garage = document.getElementById('garageContainer');
   if (garage) {
     garage.innerHTML = `
@@ -594,10 +591,13 @@ window.updateUserStatus = async () => {
   }
 };
 
+/**
+ * ИЗМЕНЕНИЕ НИКНЕЙМА И ПРОФИЛЯ
+ */
 window.openEditProfile = async () => {
   if (window.myProfile?.isGuest || !window.currentUserId) return;
 
-  const frames = [{ id: 'frame-default', name: 'Standart' }, { id: 'frame-mw', name: 'Most Wanted' }];
+  const frames = [{id: 'frame-default', name: 'Standart'}, {id: 'frame-mw', name: 'Most Wanted'}];
   let framesHtml = '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 15px;">';
   frames.forEach(f => {
     const isSelected = window.profileData.selected_frame === f.id ? 'border: 2px solid var(--nfs-yellow);' : 'border: 1px solid #333;';
@@ -605,16 +605,20 @@ window.openEditProfile = async () => {
   });
   framesHtml += '</div>';
 
-  const { value: formValues } = await Swal.fire({
+  const {value: formValues} = await Swal.fire({
     html: `
-      <p style="font-size:0.8rem; text-align: center; text-transform: uppercase;">BIO:</p>
+      <p style="font-size:0.8rem; text-align: center; text-transform: uppercase;">NICKNAME:</p>
+      <input id="swal-username" class="swal2-input" value="${window.profileData.username || ''}" style="background:#111; color:#fff; width:100%; box-sizing:border-box; text-align: center; margin: 10px 0;">
+
+      <p style="font-size:0.8rem; text-align: center; text-transform: uppercase; margin-top: 10px;">BIO:</p>
       <input id="swal-bio" class="swal2-input" value="${window.profileData.bio || ''}" style="background:#111; color:#fff; width:100%; box-sizing:border-box; text-align: center; margin: 10px 0;">
+
       <p style="margin-top:15px; font-size:0.8rem; text-align: center; text-transform: uppercase;">FRAME SELECTION:</p>
       ${framesHtml}
     `,
     showCancelButton: true,
     confirmButtonText: 'TO SET IT!',
-    customClass: { popup: 'nfs-crt-modal' },
+    customClass: {popup: 'nfs-crt-modal'},
     didOpen: () => {
       const confirmBtn = Swal.getConfirmButton();
       if (confirmBtn) {
@@ -622,18 +626,54 @@ window.openEditProfile = async () => {
         confirmBtn.style.boxShadow = '0 0 10px rgba(241, 196, 15, 0.5)';
       }
     },
-    preConfirm: () => ({
-      bio: document.getElementById('swal-bio').value,
-      frame: window.tempSelectedFrame || window.profileData.selected_frame
-    })
+    preConfirm: () => {
+      const usernameInput = document.getElementById('swal-username').value.trim();
+      if (!usernameInput) {
+        Swal.showValidationMessage('Nickname cannot be empty!');
+        return false;
+      }
+      return {
+        username: usernameInput,
+        bio: document.getElementById('swal-bio').value,
+        frame: window.tempSelectedFrame || window.profileData.selected_frame
+      };
+    }
   });
 
-  if (formValues) {
+  if (formValues.username !== window.profileData.username) {
+    const {data: existingUser} = await _supabase
+      .from('profiles')
+      .select('id')
+      .ilike('username', formValues.username)
+      .maybeSingle();
+
+    // id должен отличаться от вашего текущего ID
+    if (existingUser && existingUser.id !== window.currentUserId) {
+      Swal.fire({
+        title: 'ERROR',
+        text: 'This nickname is already taken by another racer!',
+        icon: 'error',
+        customClass: {popup: 'nfs-crt-modal'}
+      });
+      return;
+    }
+
     const { error } = await _supabase.from('profiles').update({
+      username: formValues.username,
       bio: formValues.bio,
       selected_frame: formValues.frame
     }).eq('id', window.currentUserId);
-    if (!error) location.reload();
+
+    if (error) {
+      Swal.fire({
+        title: 'ERROR',
+        text: error.message || 'Failed to update profile.',
+        icon: 'error',
+        customClass: { popup: 'nfs-crt-modal' }
+      });
+    } else {
+      location.reload();
+    }
   }
 };
 
@@ -647,7 +687,6 @@ async function checkFriendshipStatus(targetUserId) {
   const btn = document.getElementById('friendBtn');
   const msgBtn = document.getElementById('msgBtn');
 
-  // Если гость просматривает чужой профиль
   if (window.myProfile?.isGuest) {
     if (btn) {
       btn.classList.remove('hidden');
@@ -670,7 +709,6 @@ async function checkFriendshipStatus(targetUserId) {
     return;
   }
 
-  // Если это собственный профиль
   if (!window.myProfile || targetUserId === window.myProfile.id) {
     if (btn) btn.classList.add('hidden');
     if (msgBtn) msgBtn.classList.add('hidden');
