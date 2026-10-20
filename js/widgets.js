@@ -251,6 +251,7 @@ window.initGlobalStatus = async function(supabaseClient, profile) {
 
   // Слушатель личных сообщений (только для авторизованных)
   if (!isGuest && window.myProfile.id) {
+    supabaseClient.removeChannel(supabaseClient.channel('global-audio-messages'));
     supabaseClient.channel('global-audio-messages')
       .on('postgres_changes', {
         event: 'INSERT',
@@ -269,6 +270,7 @@ window.initGlobalStatus = async function(supabaseClient, profile) {
   }
 
   // Перехват новостей от Davenport (доступен всем, включая гостей)
+  supabaseClient.removeChannel(supabaseClient.channel('global-announcements'));
   supabaseClient.channel('global-announcements')
     .on('postgres_changes', {
       event: 'INSERT',
@@ -432,7 +434,6 @@ async function refreshSteamFriendsList(supabaseClient, myProfile) {
   const body = document.getElementById('steamFriendsBody');
   if (!body) return;
 
-  // Если профиль гостя — показываем приглашение войти
   if (!myProfile || myProfile.isGuest || !myProfile.id) {
     body.innerHTML = `
       <div style="text-align: center; margin-top: 50px; padding: 0 10px;">
