@@ -283,17 +283,6 @@ function getMuteRemainingText(mutedUntilDate) {
 function renderFullProfile(data, isMine) {
   const nameEl = document.getElementById('profName');
   const badgeEl = document.getElementById('badgeContainer');
-  const frameEl = document.getElementById('avatarFrame');
-
-  if (frameEl) {
-    frameEl.className = 'avatar-container';
-    if (data.selected_frame) frameEl.classList.add(data.selected_frame);
-    else if (data.username === 'Davenport' || data.username === 'test1') frameEl.classList.add('frame-mw');
-    else if (data.is_admin) frameEl.classList.add('frame-admin');
-    else if (data.is_mod) frameEl.classList.add('frame-mod');
-    else if (data.is_vip) frameEl.classList.add('frame-vip');
-    else frameEl.classList.add('frame-default');
-  }
 
   const isMuted = data.muted_until && new Date(data.muted_until) > new Date();
 
@@ -592,18 +581,10 @@ window.updateUserStatus = async () => {
 };
 
 /**
- * ИЗМЕНЕНИЕ НИКНЕЙМА И ПРОФИЛЯ
+ * ИЗМЕНЕНИЕ НИКНЕЙМА И БИО (БЕЗ РАМОК)
  */
 window.openEditProfile = async () => {
   if (window.myProfile?.isGuest || !window.currentUserId) return;
-
-  const frames = [{id: 'frame-default', name: 'Standart'}, {id: 'frame-mw', name: 'Most Wanted'}];
-  let framesHtml = '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 15px;">';
-  frames.forEach(f => {
-    const isSelected = window.profileData.selected_frame === f.id ? 'border: 2px solid var(--nfs-yellow);' : 'border: 1px solid #333;';
-    framesHtml += `<div onclick="selectFrame('${f.id}')" id="${f.id}" class="frame-preview ${f.id}" style="cursor:pointer; padding:10px; ${isSelected} background: rgba(0,0,0,0.5); font-size: 0.7rem; text-align: center;">${f.name.toUpperCase()}</div>`;
-  });
-  framesHtml += '</div>';
 
   const {value: formValues} = await Swal.fire({
     html: `
@@ -612,9 +593,6 @@ window.openEditProfile = async () => {
 
       <p style="font-size:0.8rem; text-align: center; text-transform: uppercase; margin-top: 10px;">BIO:</p>
       <input id="swal-bio" class="swal2-input" value="${window.profileData.bio || ''}" style="background:#111; color:#fff; width:100%; box-sizing:border-box; text-align: center; margin: 10px 0;">
-
-      <p style="margin-top:15px; font-size:0.8rem; text-align: center; text-transform: uppercase;">FRAME SELECTION:</p>
-      ${framesHtml}
     `,
     showCancelButton: true,
     confirmButtonText: 'TO SET IT!',
@@ -634,8 +612,7 @@ window.openEditProfile = async () => {
       }
       return {
         username: usernameInput,
-        bio: document.getElementById('swal-bio').value,
-        frame: window.tempSelectedFrame || window.profileData.selected_frame
+        bio: document.getElementById('swal-bio').value
       };
     }
   });
@@ -661,11 +638,10 @@ window.openEditProfile = async () => {
     }
   }
 
-  // Обновляем профиль в базе данных (и ник, и био, и рамку)
+  // Обновляем профиль в базе данных (только ник и био)
   const { error } = await _supabase.from('profiles').update({
     username: formValues.username,
-    bio: formValues.bio,
-    selected_frame: formValues.frame
+    bio: formValues.bio
   }).eq('id', window.currentUserId);
 
   if (error) {
@@ -678,12 +654,6 @@ window.openEditProfile = async () => {
   } else {
     location.reload();
   }
-};
-
-window.selectFrame = (id) => {
-  window.tempSelectedFrame = id;
-  document.querySelectorAll('.frame-preview').forEach(el => el.style.border = '1px solid #333');
-  document.getElementById(id).style.border = '2px solid var(--nfs-yellow)';
 };
 
 async function checkFriendshipStatus(targetUserId) {
