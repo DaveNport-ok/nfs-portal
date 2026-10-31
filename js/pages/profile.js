@@ -640,6 +640,9 @@ window.openEditProfile = async () => {
     }
   });
 
+  if (!formValues) return;
+
+  // Если никнейм был изменен, проверяем, не занят ли он другим пользователем
   if (formValues.username !== window.profileData.username) {
     const {data: existingUser} = await _supabase
       .from('profiles')
@@ -647,7 +650,6 @@ window.openEditProfile = async () => {
       .ilike('username', formValues.username)
       .maybeSingle();
 
-    // id должен отличаться от вашего текущего ID
     if (existingUser && existingUser.id !== window.currentUserId) {
       Swal.fire({
         title: 'ERROR',
@@ -657,23 +659,24 @@ window.openEditProfile = async () => {
       });
       return;
     }
+  }
 
-    const { error } = await _supabase.from('profiles').update({
-      username: formValues.username,
-      bio: formValues.bio,
-      selected_frame: formValues.frame
-    }).eq('id', window.currentUserId);
+  // Обновляем профиль в базе данных (и ник, и био, и рамку)
+  const { error } = await _supabase.from('profiles').update({
+    username: formValues.username,
+    bio: formValues.bio,
+    selected_frame: formValues.frame
+  }).eq('id', window.currentUserId);
 
-    if (error) {
-      Swal.fire({
-        title: 'ERROR',
-        text: error.message || 'Failed to update profile.',
-        icon: 'error',
-        customClass: { popup: 'nfs-crt-modal' }
-      });
-    } else {
-      location.reload();
-    }
+  if (error) {
+    Swal.fire({
+      title: 'ERROR',
+      text: error.message || 'Failed to update profile.',
+      icon: 'error',
+      customClass: { popup: 'nfs-crt-modal' }
+    });
+  } else {
+    location.reload();
   }
 };
 
