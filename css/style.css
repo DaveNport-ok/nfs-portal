@@ -777,12 +777,6 @@ body.chats-page, body.topic-page, body.leaderboard-page {
   transition: transform 0.3s ease;
 }
 
-.frame-mw {
-  background: repeating-linear-gradient(-45deg, #ff8c00, #ff8c00 15px, #000 15px, #000 30px);
-  box-shadow: 0 0 20px rgba(255, 140, 0, 0.4);
-  border: 2px solid #000;
-}
-
 .avatar-big {
   width: 180px;
   height: 180px;
