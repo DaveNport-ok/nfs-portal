@@ -11,7 +11,7 @@ A retro-styled community hub and safe-house for street racers, inspired by the i
   <img src="https://github.com/user-attachments/assets/0dc45d0c-3f84-4fc2-ad4f-da529e2e5cd9" width="48%" alt="Screenshot 2" />
 </p>
 <p align="center">
-  <img width="48%" alt="Screenshot 3" src="https://github.com/user-attachments/assets/e400b30c-8e53-4814-a425-c655f46dc766" />
+  <img src="https://github.com/user-attachments/assets/e400b30c-8e53-4814-a425-c655f46dc766" width="48%" alt="Screenshot 3" />
   <img src="https://github.com/user-attachments/assets/cdd31ee2-abde-4d43-b00d-7f0188c907ef" width="48%" alt="Screenshot 4" />
 </p>
 
