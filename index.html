@@ -82,14 +82,23 @@
 </aside>
 
 <main class="main-content">
-  <div class="content-box">
-    <h1 style="color: var(--nfs-yellow); text-transform: uppercase; font-style: italic; margin-top: 0;"
-        data-i18n="welcome_title">
-      Welcome to Need For Speed Portal!
+  <div class="content-box" style="position: relative;">
+    <!-- Плашка NEWS в стиле интерфейса -->
+    <div style="display: inline-block; background: var(--nfs-yellow, #f1c40f); color: #000; font-weight: bold; font-size: 0.75rem; padding: 3px 10px; text-transform: uppercase; margin-bottom: 12px; font-style: italic; letter-spacing: 1px;">
+      NEWS & ANNOUNCEMENTS
+    </div>
+
+    <h1 id="homeWelcomeTitle" style="color: var(--nfs-yellow); text-transform: uppercase; font-style: italic; margin-top: 0; font-size: 1.8rem;">
+      WELCOME TO NEED FOR SPEED PORTAL!
     </h1>
-    <p style="font-size: 1.2rem; color: #fff; line-height: 1.5; font-weight: 300;" data-i18n="welcome_desc">
+
+    <p id="homeWelcomeDesc" style="font-size: 1.1rem; color: #ccc; line-height: 1.6; font-weight: 300; margin-bottom: 20px; font-family: 'Arial', sans-serif !important;">
       Thank you for support! All of you.
     </p>
+
+    <a id="homeTopicLink" href="forum.html" class="nfs-font" style="display: inline-block; background: rgba(241, 196, 15, 0.1); border: 1px solid var(--nfs-yellow, #f1c40f); color: var(--nfs-yellow, #f1c40f); padding: 8px 16px; text-decoration: none; font-size: 0.85rem; font-weight: bold; text-transform: uppercase; transition: all 0.2s;" onmouseover="this.style.background='var(--nfs-yellow)'; this.style.color='#000';" onmouseout="this.style.background='rgba(241, 196, 15, 0.1)'; this.style.color='var(--nfs-yellow)';">
+      READ ON FORUM →
+    </a>
   </div>
 </main>
 
