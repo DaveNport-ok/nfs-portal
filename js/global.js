@@ -38,6 +38,37 @@ function getRelativeTime(dateString) {
 }
 
 /**
+ * Автоматическая подгрузка последнего объявления на главную страницу
+ */
+window.loadLatestAnnouncement = async function() {
+  const titleEl = document.getElementById('homeWelcomeTitle');
+  const descEl = document.getElementById('homeWelcomeDesc');
+  const linkEl = document.getElementById('homeTopicLink');
+
+  if (!titleEl && !descEl) return; // Если это не главная страница, выходим
+
+  const { data, error } = await _supabase
+    .from('forum_topics')
+    .select('id, title, content')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .single();
+
+  if (!error && data) {
+    if (titleEl) titleEl.innerText = data.title;
+    if (descEl) {
+      // Делаем превью текста, если он слишком длинный для главной, либо выводим целиком
+      const rawContent = data.content || '';
+      descEl.innerText = rawContent.length > 250 ? rawContent.substring(0, 250) + '...' : rawContent;
+    }
+    // Динамически меняем ссылку кнопки на конкретную тему форума
+    if (linkEl) {
+      linkEl.href = `topic.html?id=${data.id}`;
+    }
+  }
+};
+
+/**
  * Обновление счетчика непрочитанных сообщений
  */
 window.updateGlobalMsgBadge = async function(supabaseClient, myId) {
@@ -103,7 +134,7 @@ window.toggleNotifyPopup = function() {
 };
 
 /**
- * Обновление списка уведомлений (Без перерисовок DOM в цикле)
+ * Обновление списка уведомлений
  */
 window.updateFriendNotifications = async function() {
   if (typeof _supabase === 'undefined' || window.myProfile?.isGuest) return;
@@ -486,10 +517,13 @@ window.openModal = async function() {
 };
 
 /**
- * Оптимизированный старт страницы (Оптимистичный UI + Параллельные сетевые запросы)
+ * Инициализация при загрузке страницы
  */
 document.addEventListener('DOMContentLoaded', async () => {
   if (typeof _supabase === 'undefined') return;
+
+  // Всегда пытаемся подгрузить свежее объявление на главную страницу (для гостей и авторизованных)
+  await window.loadLatestAnnouncement();
 
   try {
     // 1. МГНОВЕННО проверяем кэш sessionStorage
@@ -504,7 +538,6 @@ document.addEventListener('DOMContentLoaded', async () => {
           window.currentUserId = cachedProfile.id;
           hasValidCache = true;
 
-          // Если функция инициализации статуса есть (в widgets.js), запускаем её мгновенно
           if (typeof window.initGlobalStatus === 'function') {
             window.initGlobalStatus(_supabase, cachedProfile);
           }
@@ -548,17 +581,17 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       sessionStorage.setItem('myProfile', JSON.stringify(profile));
 
-      // Если кэша не было (первый заход) — инициализируем статус
       if (!hasValidCache && typeof window.initGlobalStatus === 'function') {
         window.initGlobalStatus(_supabase, profile);
       }
 
-      // 4. Безопасный и параллельный запуск всех фоновых задач
+      // 4. Безопасный и параллельный запуск всех фоновых задач (включая обновление объявления)
       Promise.allSettled([
         window.checkDailyBonus(profile),
         window.updateGlobalMsgBadge(_supabase, profile.id),
         window.updateFriendNotifications(),
-        window.checkAdminReplies()
+        window.checkAdminReplies(),
+        window.loadLatestAnnouncement()
       ]);
 
       setupNotificationsRealtime(profile.id);
