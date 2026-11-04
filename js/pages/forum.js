@@ -89,7 +89,7 @@ window.onload = async () => {
 };
 
 /**
- * Блокировка полей создания новой темы для гостя
+ - Блокировка полей создания новой темы для гостя
  */
 function lockNewTopicFormForGuest() {
   const titleInput = document.getElementById('topicTitle');
@@ -120,9 +120,11 @@ function lockNewTopicFormForGuest() {
 }
 
 async function loadTopics() {
+  // Сортировка: сначала закрепленные (is_pinned desc), затем по дате создания (created_at desc)
   const { data, error } = await _supabase
     .from('forum_topics')
     .select('*')
+    .order('is_pinned', { ascending: false })
     .order('created_at', { ascending: false });
 
   const list = document.getElementById('topicsList');
@@ -134,16 +136,38 @@ async function loadTopics() {
     return;
   }
 
+  // Проверяем, является ли текущий пользователь админом
+  const isAdmin = myProfile && !myProfile.isGuest && myProfile.is_admin === true;
+
   if (data && data.length > 0) {
     data.forEach(topic => {
       const date = new Date(topic.created_at).toLocaleDateString();
       const rawContent = topic.content || '';
       const previewText = rawContent.length > 120 ? rawContent.substring(0, 120) + '...' : rawContent;
 
+      const isPinned = topic.is_pinned;
+      // Показывать кнопку пина/открепления может только администратор
+      const canPin = isAdmin;
+
+      let pinButtonHtml = '';
+      if (canPin) {
+        pinButtonHtml = `
+          <button onclick="event.stopPropagation(); togglePinTopic('${topic.id}', ${isPinned})"
+                  style="background: ${isPinned ? '#e67e22' : '#333'}; color: #fff; border: none; padding: 4px 8px; border-radius: 4px; font-size: 0.75rem; cursor: pointer; margin-left: 10px;">
+            ${isPinned ? '📌 UNPIN' : '📍 PIN'}
+          </button>
+        `;
+      }
+
+      const pinnedCardStyle = isPinned ? 'border-left: 4px solid #e67e22; background: rgba(230, 126, 34, 0.05);' : '';
+
       list.innerHTML += `
-        <div class="topic-card" onclick="window.location.href='topic.html?id=${topic.id}'">
-          <div class="topic-title">${escapeHtml(topic.title)}</div>
-          <div class="user-text-content" style="margin-bottom: 10px;">${escapeHtml(previewText)}</div>
+        <div class="topic-card ${isPinned ? 'pinned-topic' : ''}" style="${pinnedCardStyle}" onclick="window.location.href='topic.html?id=${topic.id}'">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+            <div class="topic-title">${escapeHtml(topic.title)} ${isPinned ? '<span style="color: #e67e22; font-size: 0.8rem;">(PINNED)</span>' : ''}</div>
+            <div>${pinButtonHtml}</div>
+          </div>
+          <div class="user-text-content" style="margin-bottom: 10px; margin-top: 5px;">${escapeHtml(previewText)}</div>
           <div style="font-size: 0.8rem; color: #777; font-family: 'Arial', 'Helvetica', sans-serif !important;">
             Author: <strong style="color: #aaa;">${escapeHtml(topic.author_name)}</strong> • ${date}
           </div>
@@ -154,6 +178,26 @@ async function loadTopics() {
     list.innerHTML = '<p style="color: #666; font-size: 0.85rem; padding: 20px 0;">No topics created yet.</p>';
   }
 }
+
+// Функция для закрепления/открепления темы
+window.togglePinTopic = async (topicId, currentPinState) => {
+  if (!myProfile || myProfile.isGuest) return;
+
+  try {
+    const { error } = await _supabase
+      .from('forum_topics')
+      .update({ is_pinned: !currentPinState })
+      .eq('id', topicId);
+
+    if (error) throw error;
+
+    // Перезагружаем список тем
+    await loadTopics();
+  } catch (err) {
+    console.error('Failed to update pin status:', err);
+    alert('Failed to update pin status: ' + err.message);
+  }
+};
 
 window.createNewTopic = async () => {
   // Защита от гостей
@@ -212,7 +256,8 @@ window.createNewTopic = async () => {
         content,
         author_name: myProfile.username,
         author_id: myProfile.id,
-        category: 'game'
+        category: 'game',
+        is_pinned: false // По умолчанию новые темы не закреплены
       }])
       .select('id')
       .single();
