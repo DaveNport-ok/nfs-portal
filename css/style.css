@@ -2426,3 +2426,27 @@ button:not(.btn-tuning):not(.steam-friends-toggle-btn):hover::after,
   pointer-events: none;
   opacity: 0.4;
 }
+
+/* ==========================================================================
+   11. СТИЛИ ДЛЯ ЗАКРЕПЛЕННЫХ ТЕМ ФОРУМА (PINNED TOPICS)
+   ========================================================================== */
+.topic-card {
+  position: relative;
+  background: rgba(10, 10, 10, 0.95) !important;
+}
+
+.topic-card.pinned-topic {
+  border-left: 4px solid var(--nfs-yellow) !important;
+  background: rgba(10, 10, 10, 0.96) !important;
+  box-shadow: inset 3px 0 0 var(--nfs-yellow), 0 0 20px rgba(0, 0, 0, 0.9) !important;
+}
+
+.topic-card.pinned-topic .topic-title {
+  color: var(--nfs-yellow) !important;
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.9) !important;
+}
+
+.topic-card.pinned-topic .user-text-content {
+  color: #ffffff !important;
+  text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.9) !important;
+}
