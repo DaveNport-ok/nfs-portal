@@ -6,14 +6,14 @@ window.onlineUsers = {};
 let globalOnlineDebounceTimer = null;
 
 /**
- * Проверка, является ли текущий пользователь гостем
+ - Проверка, является ли текущий пользователь гостем
  */
 window.isGuestUser = function() {
   return !window.myProfile || window.myProfile.isGuest === true || !window.myProfile.id;
 };
 
 /**
- * Обертка для защиты действий (кнопки, отправка форм и т.д.)
+ - Обертка для защиты действий (кнопки, отправка форм и т.д.)
  */
 window.requireAuth = function(actionCallback, message = "This action is available for authorized drivers only.") {
   if (window.isGuestUser()) {
@@ -51,7 +51,7 @@ window.requireAuth = function(actionCallback, message = "This action is availabl
 };
 
 /**
- * Блокировка полей ввода для гостей на страницах
+ - Блокировка полей ввода для гостей на страницах
  */
 window.applyGuestRestrictions = function() {
   if (!window.isGuestUser()) return;
@@ -77,7 +77,7 @@ window.applyGuestRestrictions = function() {
 };
 
 /**
- * Форматирование времени последнего визита
+ - Форматирование времени последнего визита
  */
 window.formatLastSeen = function(dateString) {
   if (!dateString) return "a long time ago";
@@ -94,7 +94,7 @@ window.formatLastSeen = function(dateString) {
 };
 
 /**
- * Обновление плашки пользователя в нижнем баре
+ - Обновление плашки пользователя в нижнем баре
  */
 function updateFooterUserBadge(profile) {
   const badgeEl = document.getElementById('footerUserBadge');
@@ -120,7 +120,7 @@ function updateFooterUserBadge(profile) {
 }
 
 /**
- * Инициализация онлайн-статуса и глобальных каналов (С ОПТИМИЗАЦИЕЙ СКАЧКОВ)
+ - Инициализация онлайн-статуса и глобальных каналов (С ОПТИМИЗАЦИЕЙ СКАЧКОВ)
  */
 window.initGlobalStatus = async function(supabaseClient, profile) {
   if (!supabaseClient) return;
@@ -354,7 +354,7 @@ window.initGlobalStatus = async function(supabaseClient, profile) {
 };
 
 /**
- * Виджет друзей Steam
+ - Виджет друзей Steam
  */
 function injectSteamFriendsWidget(supabaseClient, myProfile) {
   if (!supabaseClient || !myProfile) return;
@@ -384,12 +384,10 @@ function injectSteamFriendsWidget(supabaseClient, myProfile) {
     .steam-friend-row:hover { background: rgba(255, 255, 255, 0.03); }
     .steam-friend-avatar { width: 34px; height: 34px; object-fit: cover; border: 2px solid #555; }
     .steam-border-online { border-color: #57cbde !important; }
-    .steam-border-ingame { border-color: #90ba3c !important; }
     .steam-border-offline { border-color: rgba(255,255,255,0.1) !important; }
     .steam-friend-info { display: flex; flex-direction: column; line-height: 1.2; overflow: hidden; }
     .steam-friend-name { font-size: 0.85rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .steam-text-online { color: #57cbde; }
-    .steam-text-ingame { color: #90ba3c; }
     .steam-text-offline { color: #8f98a0; }
     .steam-friend-status-text { font-size: 0.7rem; }
   `;
@@ -469,11 +467,9 @@ async function refreshSteamFriendsList(supabaseClient, myProfile) {
 
   if (!profiles) return;
 
-  let playingHTML = '';
   let onlineHTML = '';
   let offlineHTML = '';
 
-  let playingCount = 0;
   let onlineCount = 0;
   let offlineCount = 0;
 
@@ -485,39 +481,21 @@ async function refreshSteamFriendsList(supabaseClient, myProfile) {
     let borderClass = 'steam-border-offline';
 
     if (isOnline) {
-      const pData = presence[0];
-      const liveStatus = pData.status || 'ONLINE';
       const avatarSrc = friend.avatar_url || 'https://via.placeholder.com/34';
 
-      if (liveStatus === 'IN-GAME') {
-        playingCount++;
-        dotColorClass = 'steam-text-ingame';
-        borderClass = 'steam-border-ingame';
+      onlineCount++;
+      dotColorClass = 'steam-text-online';
+      borderClass = 'steam-border-online';
 
-        playingHTML += `
-          <div class="steam-friend-row" onclick="window.location.href='profile.html?u=${friend.username}'">
-            <img src="${avatarSrc}" class="steam-friend-avatar ${borderClass}">
-            <div class="steam-friend-info">
-              <span class="steam-friend-name ${dotColorClass}">${friend.username}</span>
-              <span class="steam-friend-status-text ${dotColorClass}">IN-GAME</span>
-            </div>
+      onlineHTML += `
+        <div class="steam-friend-row" onclick="window.location.href='profile.html?u=${friend.username}'">
+          <img src="${avatarSrc}" class="steam-friend-avatar ${borderClass}">
+          <div class="steam-friend-info">
+            <span class="steam-friend-name ${dotColorClass}">${friend.username}</span>
+            <span class="steam-friend-status-text ${dotColorClass}">Online</span>
           </div>
-        `;
-      } else {
-        onlineCount++;
-        dotColorClass = 'steam-text-online';
-        borderClass = 'steam-border-online';
-
-        onlineHTML += `
-          <div class="steam-friend-row" onclick="window.location.href='profile.html?u=${friend.username}'">
-            <img src="${avatarSrc}" class="steam-friend-avatar ${borderClass}">
-            <div class="steam-friend-info">
-              <span class="steam-friend-name ${dotColorClass}">${friend.username}</span>
-              <span class="steam-friend-status-text ${dotColorClass}">Online</span>
-            </div>
-          </div>
-        `;
-      }
+        </div>
+      `;
     } else {
       offlineCount++;
       let lastSeenText = "Last online long ago";
@@ -541,15 +519,8 @@ async function refreshSteamFriendsList(supabaseClient, myProfile) {
 
   let finalHTML = '';
 
-  if (playingCount > 0) {
-    finalHTML += `
-      <div class="steam-cat-title" style="color: #90ba3c;">Playing (${playingCount})</div>
-      ${playingHTML}
-    `;
-  }
-
   finalHTML += `
-    <div class="steam-cat-title" style="${playingCount > 0 ? 'margin-top:20px;' : ''}">Online Friends (${onlineCount})</div>
+    <div class="steam-cat-title">Online Friends (${onlineCount})</div>
     ${onlineHTML || '<p style="color:#444; font-size:0.75rem; margin-left:5px;">There is no one online</p>'}
 
     <div class="steam-cat-title" style="margin-top:20px;">Offline (${offlineCount})</div>
