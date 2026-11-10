@@ -536,3 +536,4 @@ window.updateSteamFriendsWidgetOnly = function () {
     refreshSteamFriendsList(_supabase, window.myProfile);
   }
 };
+
